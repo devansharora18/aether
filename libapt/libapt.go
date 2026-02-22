@@ -57,3 +57,15 @@ func Search(terms []string, stream bool) (*Result, error) {
 	args := append([]string{"search"}, terms...)
 	return run(args, stream)
 }
+
+func SearchContext(ctx context.Context, terms []string) (*Result, error) {
+	args := append([]string{"search"}, terms...)
+	var out bytes.Buffer
+
+	cmd := exec.CommandContext(ctx, "apt", args...)
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+
+	return &Result{Output: out.String(), Err: err}, err
+}

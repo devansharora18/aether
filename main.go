@@ -5,10 +5,11 @@ import (
 	"os"
 
 	"github.com/devansharora18/aether/actions"
+	"github.com/devansharora18/aether/tui"
 )
 
 func printUsage() {
-	fmt.Printf("Usage: aether <flag> [package(s)]\n\nFlags:\n  -S <pkg...>     Install packages\n  -R <pkg...>     Remove packages\n  -Sy             Update package database\n  -Syu            Update + upgrade\n  -Ss <query>     Search packages\n")
+	fmt.Printf("Usage: aether [flag] [package(s)]\n\nNo flags launches interactive TUI mode.\n\nFlags:\n  -S <pkg...>     Install packages\n  -R <pkg...>     Remove packages\n  -Sy             Update package database\n  -Syu            Update + upgrade\n  -Ss <query>     Search packages\n  -v              Verbose apt output\n")
 }
 
 func main() {
@@ -28,7 +29,10 @@ func main() {
 	actions.Verbose = verbose
 
 	if len(filtered) < 1 {
-		printUsage()
+		if err := tui.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "TUI failed: %v\n", err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
