@@ -175,19 +175,72 @@ func runOperation(app *tview.Application, pages *tview.Pages, title string, runn
 
 func showSearch(app *tview.Application, pages *tview.Pages) {
 	input := tview.NewInputField().SetLabel("Search: ")
-	results := tview.NewTextView().SetDynamicColors(true)
-	results.SetBorder(true).SetTitle(" Results ")
-	results.SetText("Type to search packages...")
+	results := tview.NewList().ShowSecondaryText(true)
+	results.SetBorder(true).SetTitle(" Results (↑/↓ navigate, Enter install, Tab switch focus) ")
+	details := tview.NewTextView().SetDynamicColors(true)
+	details.SetBorder(true).SetTitle(" Details ")
+	details.SetText("Type to search packages...")
 
 	var mu sync.Mutex
 	var cancel context.CancelFunc
 	var timer *time.Timer
 	requestID := 0
+	activeResults := make([]packageResult, 0)
+
+	renderDetails := func(idx int) {
+		if idx < 0 || idx >= len(activeResults) {
+			details.SetText("No package selected")
+			return
+		}
+		r := activeResults[idx]
+		details.SetText(fmt.Sprintf(
+			"[green::b]%s[-]\n[gray]repo:[-] %s\n[gray]version:[-] %s\n[gray]arch:[-] %s\n\n%s\n\n[gray]Press Enter to install selected package[-]",
+			r.name,
+			r.repo,
+			r.version,
+			r.arch,
+			r.description,
+		))
+	}
+
+	installSelected := func(idx int) {
+		if idx < 0 || idx >= len(activeResults) {
+			return
+		}
+		if !ensureRoot(app, pages) {
+			return
+		}
+
+		pkg := activeResults[idx]
+		modal := tview.NewModal().
+			SetText(fmt.Sprintf("Install package '%s'?", pkg.name)).
+			AddButtons([]string{"Install", "Cancel"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				pages.RemovePage("search-install-modal")
+				if buttonIndex != 0 || buttonLabel != "Install" {
+					return
+				}
+				runOperation(app, pages, "Install package", func() (*libapt.Result, error) {
+					return libapt.Install([]string{pkg.name}, false)
+				})
+			})
+		modal.SetTitle(" Confirm Install ").SetBorder(true)
+		pages.AddPage("search-install-modal", modal, true, true)
+	}
+
+	results.SetChangedFunc(func(index int, _, _ string, _ rune) {
+		renderDetails(index)
+	})
+	results.SetSelectedFunc(func(index int, _, _ string, _ rune) {
+		installSelected(index)
+	})
 
 	kickSearch := func(text string) {
 		query := strings.TrimSpace(text)
 		if query == "" {
-			results.SetText("Type to search packages...")
+			results.Clear()
+			activeResults = activeResults[:0]
+			details.SetText("Type to search packages...")
 			return
 		}
 
@@ -201,7 +254,9 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 		cancel = c
 		mu.Unlock()
 
-		results.SetText(fmt.Sprintf("Searching for: %s", query))
+		results.Clear()
+		results.AddItem("Searching...", query, 0, nil)
+		details.SetText(fmt.Sprintf("Searching for [cyan]%s[-]", query))
 
 		go func(localID int, localQuery string, localCtx context.Context) {
 			res, err := libapt.SearchContext(localCtx, []string{localQuery})
@@ -215,11 +270,48 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 				if localID != latest {
 					return
 				}
+
+				results.Clear()
 				if err != nil {
-					results.SetText("Search failed:\n\n" + strings.TrimSpace(res.Output))
+					activeResults = activeResults[:0]
+					results.AddItem("Search failed", "See details panel", 0, nil)
+					details.SetText("[red]Search failed[-]\n\n" + strings.TrimSpace(res.Output))
 					return
 				}
-				results.SetText(formatSearchResults(localQuery, res.Output))
+
+				parsed := parseSearchResults(res.Output)
+				if len(parsed) == 0 {
+					activeResults = activeResults[:0]
+					results.AddItem("No packages found", localQuery, 0, nil)
+					details.SetText(fmt.Sprintf("[yellow]No packages found[-] for [cyan]%s[-]", localQuery))
+					return
+				}
+
+				sort.Slice(parsed, func(i, j int) bool {
+					return parsed[i].name < parsed[j].name
+				})
+				activeResults = parsed
+
+				limit := len(activeResults)
+				if limit > 50 {
+					limit = 50
+				}
+
+				for i := 0; i < limit; i++ {
+					r := activeResults[i]
+					secondary := strings.TrimSpace(fmt.Sprintf("%s  %s  %s", r.repo, r.version, r.arch))
+					if secondary == "" {
+						secondary = r.description
+					}
+					results.AddItem(r.name, secondary, 0, nil)
+				}
+
+				if len(activeResults) > limit {
+					results.AddItem("…", fmt.Sprintf("%d more results (refine query)", len(activeResults)-limit), 0, nil)
+				}
+
+				results.SetCurrentItem(0)
+				renderDetails(0)
 			})
 		}(id, query, ctx)
 	}
@@ -237,12 +329,24 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 		mu.Unlock()
 	})
 
+	body := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(results, 0, 2, false).
+		AddItem(details, 0, 3, false)
+
 	searchFlex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(input, 3, 0, true).
-		AddItem(results, 0, 1, false)
+		AddItem(body, 0, 1, false)
 	searchFlex.SetBorder(true).SetTitle(" Live Search (-Ss) ")
 	searchFlex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
+		switch event.Key() {
+		case tcell.KeyTAB:
+			if app.GetFocus() == input {
+				app.SetFocus(results)
+			} else {
+				app.SetFocus(input)
+			}
+			return nil
+		case tcell.KeyEscape:
 			mu.Lock()
 			if timer != nil {
 				timer.Stop()
@@ -253,6 +357,13 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 			mu.Unlock()
 			pages.SwitchToPage("menu")
 			pages.RemovePage("search")
+			return nil
+		}
+
+		if app.GetFocus() == input && (event.Key() == tcell.KeyDown || event.Key() == tcell.KeyUp) {
+			if results.GetItemCount() > 0 {
+				app.SetFocus(results)
+			}
 			return nil
 		}
 		return event
@@ -357,6 +468,9 @@ func parseSearchResults(raw string) []packageResult {
 		repo := ""
 		if len(nameRepo) == 2 {
 			repo = nameRepo[1]
+			if comma := strings.Index(repo, ","); comma != -1 {
+				repo = repo[:comma]
+			}
 		}
 
 		version := fields[1]
