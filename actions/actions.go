@@ -9,6 +9,11 @@ import (
 	"github.com/devansharora18/aether/ui"
 )
 
+// Verbose controls whether apt output is streamed live. When false, some
+// noisy commands (update/upgrade) will show a minimal "fetching..." message
+// instead of the full apt progress lines.
+var Verbose = false
+
 func needsRoot(op string) bool {
 	if os.Geteuid() != 0 {
 		ui.Fatal("This operation requires root privileges.")
@@ -29,16 +34,29 @@ func Install(pkgs []string) {
 	}
 
 	ui.Header(fmt.Sprintf("Installing: %s", strings.Join(pkgs, "  ")))
-	ui.Info("Invoking: apt install " + strings.Join(pkgs, " "))
-	fmt.Println()
-
-	if _, err := libapt.Install(pkgs, true); err != nil {
+	if Verbose {
+		ui.Info("Invoking: apt install " + strings.Join(pkgs, " "))
 		fmt.Println()
-		ui.Fatal("Installation failed — apt exited with an error.")
-		os.Exit(1)
+		if _, err := libapt.Install(pkgs, true); err != nil {
+			fmt.Println()
+			ui.Fatal("Installation failed — apt exited with an error.")
+			os.Exit(1)
+		}
+		fmt.Println()
+		ui.Success("Done. Package(s) installed successfully.")
+	} else {
+		progress := ui.StartProgress("fetching")
+		res, err := libapt.Install(pkgs, false)
+		progress.Stop()
+		if err != nil {
+			if strings.TrimSpace(res.Output) != "" {
+				fmt.Print(res.Output)
+			}
+			ui.Fatal("Installation failed — apt exited with an error.")
+			os.Exit(1)
+		}
+		ui.Success("Done. Package(s) installed successfully.")
 	}
-	fmt.Println()
-	ui.Success("Done. Package(s) installed successfully.")
 }
 
 func Remove(pkgs []string) {
@@ -52,16 +70,29 @@ func Remove(pkgs []string) {
 	}
 
 	ui.Header(fmt.Sprintf("Removing: %s", strings.Join(pkgs, "  ")))
-	ui.Info("Invoking: apt remove " + strings.Join(pkgs, " "))
-	fmt.Println()
-
-	if _, err := libapt.Remove(pkgs, true); err != nil {
+	if Verbose {
+		ui.Info("Invoking: apt remove " + strings.Join(pkgs, " "))
 		fmt.Println()
-		ui.Fatal("Removal failed — apt exited with an error.")
-		os.Exit(1)
+		if _, err := libapt.Remove(pkgs, true); err != nil {
+			fmt.Println()
+			ui.Fatal("Removal failed — apt exited with an error.")
+			os.Exit(1)
+		}
+		fmt.Println()
+		ui.Success("Done. Package(s) removed successfully.")
+	} else {
+		progress := ui.StartProgress("removing")
+		res, err := libapt.Remove(pkgs, false)
+		progress.Stop()
+		if err != nil {
+			if strings.TrimSpace(res.Output) != "" {
+				fmt.Print(res.Output)
+			}
+			ui.Fatal("Removal failed — apt exited with an error.")
+			os.Exit(1)
+		}
+		ui.Success("Done. Package(s) removed successfully.")
 	}
-	fmt.Println()
-	ui.Success("Done. Package(s) removed successfully.")
 }
 
 func Sync() {
@@ -70,46 +101,84 @@ func Sync() {
 	}
 
 	ui.Header("Synchronizing package databases")
-	ui.Info("Invoking: apt update")
-	fmt.Println()
-
-	if _, err := libapt.Update(true); err != nil {
+	if Verbose {
+		ui.Info("Invoking: apt update")
 		fmt.Println()
-		ui.Fatal("Database sync failed — apt exited with an error.")
-		os.Exit(1)
+		if _, err := libapt.Update(true); err != nil {
+			fmt.Println()
+			ui.Fatal("Database sync failed — apt exited with an error.")
+			os.Exit(1)
+		}
+		fmt.Println()
+		ui.Success("Package databases are up to date.")
+	} else {
+		progress := ui.StartProgress("fetching")
+		res, err := libapt.Update(false)
+		progress.Stop()
+		if err != nil {
+			if strings.TrimSpace(res.Output) != "" {
+				fmt.Print(res.Output)
+			}
+			ui.Fatal("Database sync failed — apt exited with an error.")
+			os.Exit(1)
+		}
+		ui.Success("Package databases are up to date.")
 	}
-	fmt.Println()
-	ui.Success("Package databases are up to date.")
 }
 
 func SyncUpgrade() {
 	if !needsRoot("-Syu") {
 		os.Exit(1)
 	}
-
 	ui.Header("Synchronizing package databases")
-	ui.Info("Invoking: apt update")
-	fmt.Println()
-
-	if _, err := libapt.Update(true); err != nil {
+	if Verbose {
+		ui.Info("Invoking: apt update")
 		fmt.Println()
-		ui.Fatal("Database sync failed.")
-		os.Exit(1)
+		if _, err := libapt.Update(true); err != nil {
+			fmt.Println()
+			ui.Fatal("Database sync failed.")
+			os.Exit(1)
+		}
+		fmt.Println()
+		ui.Success("Package databases synchronized.")
+	} else {
+		progress := ui.StartProgress("fetching")
+		res, err := libapt.Update(false)
+		progress.Stop()
+		if err != nil {
+			if strings.TrimSpace(res.Output) != "" {
+				fmt.Print(res.Output)
+			}
+			ui.Fatal("Database sync failed.")
+			os.Exit(1)
+		}
+		ui.Success("Package databases synchronized.")
 	}
-	fmt.Println()
-	ui.Success("Package databases synchronized.")
 
 	ui.Header("Upgrading all installed packages")
-	ui.Info("Invoking: apt upgrade")
-	fmt.Println()
-
-	if _, err := libapt.Upgrade(true); err != nil {
+	if Verbose {
+		ui.Info("Invoking: apt upgrade")
 		fmt.Println()
-		ui.Fatal("Upgrade failed — apt exited with an error.")
-		os.Exit(1)
+		if _, err := libapt.Upgrade(true); err != nil {
+			fmt.Println()
+			ui.Fatal("Upgrade failed — apt exited with an error.")
+			os.Exit(1)
+		}
+		fmt.Println()
+		ui.Success("System upgraded successfully.")
+	} else {
+		progress := ui.StartProgress("upgrading")
+		res, err := libapt.Upgrade(false)
+		progress.Stop()
+		if err != nil {
+			if strings.TrimSpace(res.Output) != "" {
+				fmt.Print(res.Output)
+			}
+			ui.Fatal("Upgrade failed — apt exited with an error.")
+			os.Exit(1)
+		}
+		ui.Success("System upgraded successfully.")
 	}
-	fmt.Println()
-	ui.Success("System upgraded successfully.")
 }
 
 func Search(terms []string) {

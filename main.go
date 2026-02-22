@@ -12,13 +12,28 @@ func printUsage() {
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	// parse optional global -v (verbose) flag anywhere in args
+	args := os.Args[1:]
+	verbose := false
+	filtered := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "-v" {
+			verbose = true
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+
+	// expose verbosity to actions package
+	actions.Verbose = verbose
+
+	if len(filtered) < 1 {
 		printUsage()
 		os.Exit(0)
 	}
 
-	flag := os.Args[1]
-	rest := os.Args[2:]
+	flag := filtered[0]
+	rest := filtered[1:]
 
 	switch flag {
 	case "-S":

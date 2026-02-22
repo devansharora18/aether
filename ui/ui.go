@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 )
 
 const (
@@ -37,4 +39,46 @@ func Warn(msg string) {
 
 func Fatal(msg string) {
 	fmt.Fprintf(os.Stderr, "%s%s ✗  %s%s%s\n", bold, brightRed, reset, msg, reset)
+}
+
+type ProgressHandle struct {
+	message string
+	stopCh  chan struct{}
+	done    chan struct{}
+	once    sync.Once
+}
+
+func StartProgress(message string) *ProgressHandle {
+	h := &ProgressHandle{
+		message: message,
+		stopCh:  make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+
+	go func() {
+		defer close(h.done)
+		dots := 0
+		ticker := time.NewTicker(300 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			fmt.Printf("\r%s%s%s", brightCyan, h.message+strings.Repeat(".", dots), reset)
+			select {
+			case <-h.stopCh:
+				return
+			case <-ticker.C:
+				dots = (dots + 1) % 6
+			}
+		}
+	}()
+
+	return h
+}
+
+func (h *ProgressHandle) Stop() {
+	h.once.Do(func() {
+		close(h.stopCh)
+		<-h.done
+		fmt.Print("\r\033[K")
+	})
 }
