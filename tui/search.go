@@ -33,14 +33,76 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 			return
 		}
 		r := activeResults[idx]
+		// Show basic info immediately, then fetch full details in background
 		details.SetText(fmt.Sprintf(
-			"[green::b]%s[-]\n[gray]repo:[-] %s\n[gray]version:[-] %s\n[gray]arch:[-] %s\n\n%s\n\n[gray]Press Enter to install selected package[-]",
-			r.name,
-			r.repo,
-			r.version,
-			r.arch,
-			r.description,
+			"[green::b]%s[-]\n[gray]repo:[-] %s\n[gray]version:[-] %s\n[gray]arch:[-] %s\n\n%s\n\n[gray]Loading full details...[-]",
+			r.name, r.repo, r.version, r.arch, r.description,
 		))
+
+		// Fetch rich package info asynchronously (like python-apt Package properties)
+		go func(name string) {
+			pkg, err := libapt.Show(name)
+			app.QueueUpdateDraw(func() {
+				// make sure we're still looking at the same package
+				cur := results.GetCurrentItem()
+				if cur < 0 || cur >= len(activeResults) || activeResults[cur].name != name {
+					return
+				}
+				if err != nil || pkg == nil {
+					details.SetText(fmt.Sprintf(
+						"[green::b]%s[-]\n[gray]repo:[-] %s\n[gray]version:[-] %s\n[gray]arch:[-] %s\n\n%s\n\n[gray]Press Enter to install selected package[-]",
+						r.name, r.repo, r.version, r.arch, r.description,
+					))
+					return
+				}
+
+				var b strings.Builder
+				b.WriteString(fmt.Sprintf("[green::b]%s[-]\n\n", pkg.Name))
+				b.WriteString(fmt.Sprintf("  [gray]Version:[-]       %s\n", pkg.Version))
+				if pkg.InstalledVersion != "" {
+					b.WriteString(fmt.Sprintf("  [gray]Installed:[-]     %s\n", pkg.InstalledVersion))
+				} else {
+					b.WriteString("  [gray]Installed:[-]     (not installed)\n")
+				}
+				b.WriteString(fmt.Sprintf("  [gray]Architecture:[-]  %s\n", pkg.Architecture))
+				if pkg.Section != "" {
+					b.WriteString(fmt.Sprintf("  [gray]Section:[-]       %s\n", pkg.Section))
+				}
+				if pkg.Origin != "" {
+					b.WriteString(fmt.Sprintf("  [gray]Origin:[-]        %s\n", pkg.Origin))
+				}
+				if pkg.Homepage != "" {
+					b.WriteString(fmt.Sprintf("  [gray]Homepage:[-]      %s\n", pkg.Homepage))
+				}
+				if pkg.PackageSize > 0 {
+					b.WriteString(fmt.Sprintf("  [gray]Download:[-]      %s\n", libapt.FormatSize(pkg.PackageSize)))
+				}
+				if pkg.InstalledSize > 0 {
+					b.WriteString(fmt.Sprintf("  [gray]Installed Size:[-] %s\n", libapt.FormatSize(pkg.InstalledSize)))
+				}
+				if len(pkg.Depends) > 0 {
+					deps := make([]string, 0, len(pkg.Depends))
+					for _, d := range pkg.Depends {
+						if d.Relation != "" {
+							deps = append(deps, fmt.Sprintf("%s (%s %s)", d.Name, d.Relation, d.Version))
+						} else {
+							deps = append(deps, d.Name)
+						}
+					}
+					b.WriteString(fmt.Sprintf("\n  [yellow]Depends:[-] %s\n", strings.Join(deps, ", ")))
+				}
+				if pkg.IsUpgradable {
+					b.WriteString(fmt.Sprintf("\n  [yellow::b]⚠ Upgrade available:[-] %s → %s\n", pkg.InstalledVersion, pkg.Version))
+				}
+				if pkg.Description != "" && pkg.Description != pkg.Summary {
+					b.WriteString(fmt.Sprintf("\n  %s\n", pkg.Description))
+				} else if pkg.Summary != "" {
+					b.WriteString(fmt.Sprintf("\n  %s\n", pkg.Summary))
+				}
+				b.WriteString("\n[gray]Press Enter to install • 'd' for remove • Esc to go back[-]")
+				details.SetText(b.String())
+			})
+		}(r.name)
 	}
 
 	installSelected := func(idx int) {
@@ -197,6 +259,36 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 			mu.Unlock()
 			pages.SwitchToPage("menu")
 			pages.RemovePage("search")
+			return nil
+		}
+
+		// 'd' to remove selected package
+		if app.GetFocus() == results && event.Rune() == 'd' {
+			idx := results.GetCurrentItem()
+			if idx >= 0 && idx < len(activeResults) {
+				if !ensureRoot(app, pages) {
+					return nil
+				}
+				pkg := activeResults[idx]
+				modal := tview.NewModal().
+					SetText(fmt.Sprintf("Remove package '%s'?", pkg.name)).
+					AddButtons([]string{"Remove", "Purge", "Cancel"}).
+					SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+						pages.RemovePage("search-remove-modal")
+						switch buttonLabel {
+						case "Remove":
+							runOperation(app, pages, "Remove package", func() (*libapt.Result, error) {
+								return libapt.Remove([]string{pkg.name}, false)
+							})
+						case "Purge":
+							runOperation(app, pages, "Purge package", func() (*libapt.Result, error) {
+								return libapt.Purge([]string{pkg.name}, false)
+							})
+						}
+					})
+				modal.SetTitle(" Confirm Remove ").SetBorder(true)
+				pages.AddPage("search-remove-modal", modal, true, true)
+			}
 			return nil
 		}
 
