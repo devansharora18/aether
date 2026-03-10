@@ -28,6 +28,7 @@ func Run() error {
 	menu.AddItem("Package info", "Show detailed package info (-Qi)", 'd', func() { showPackageInfo(app, pages) })
 	menu.AddItem("List upgradable", "Show upgradable packages (-Qu)", 'l', func() { showListUpgradable(app, pages) })
 	menu.AddItem("Clean cache", "Remove cached packages (-Sc)", 'c', func() { runOperation(app, pages, "Clean cache", cleanRunner) })
+	menu.AddItem("Manage sources", "View/add/edit/delete APT sources", 'm', func() { showSources(app, pages) })
 	menu.AddItem("Quit", "Exit TUI", 'q', func() { app.Stop() })
 
 	if os.Geteuid() != 0 {
@@ -69,5 +70,3 @@ func showInfoModal(app *tview.Application, pages *tview.Pages, title, message st
 	modal.SetTitle(title).SetBorder(true)
 	pages.AddPage("modal", modal, true, true)
 }
-
-
