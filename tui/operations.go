@@ -13,15 +13,15 @@ import (
 func installRunner(pkgs []string) (*libapt.Result, error) { return libapt.Install(pkgs, false) }
 func removeRunner(pkgs []string) (*libapt.Result, error)  { return libapt.Remove(pkgs, false) }
 func purgeRunner(pkgs []string) (*libapt.Result, error)   { return libapt.Purge(pkgs, false) }
-func updateRunner() (*libapt.Result, error)                { return libapt.Update(false) }
-func upgradeRunner() (*libapt.Result, error)               { return libapt.Upgrade(false) }
-func autoremoveRunner() (*libapt.Result, error)            { return libapt.AutoRemove(false) }
-func cleanRunner() (*libapt.Result, error)                 { return libapt.Clean() }
+func updateRunner() (*libapt.Result, error)               { return libapt.Update(false) }
+func upgradeRunner() (*libapt.Result, error)              { return libapt.Upgrade(false) }
+func autoremoveRunner() (*libapt.Result, error)           { return libapt.AutoRemove(false) }
+func cleanRunner() (*libapt.Result, error)                { return libapt.Clean() }
 
 // showPackageInfo prompts for a package name and displays rich details.
 func showPackageInfo(app *tview.Application, pages *tview.Pages) {
 	input := tview.NewInputField().SetLabel("Package: ")
-	form := tview.NewForm()
+	form := styleForm(tview.NewForm())
 	form.AddFormItem(input)
 	form.AddButton("Show", func() {
 		name := strings.TrimSpace(input.GetText())
@@ -36,54 +36,62 @@ func showPackageInfo(app *tview.Application, pages *tview.Pages) {
 		pages.RemovePage("info-form")
 	})
 	form.SetBorder(true).SetTitle(" Package Info ")
-	pages.AddAndSwitchToPage("info-form", centered(form, 70, 12), true)
+
+	hints := []keyHint{commonBackHint, {"tab", "next field"}, {"↵", "submit"}}
+	pages.AddAndSwitchToPage("info-form",
+		chrome(centered(form, 70, 9), "Package Info", hints), true)
 }
 
 func showPkgDetails(app *tview.Application, pages *tview.Pages, name string) {
 	status := tview.NewTextView().SetDynamicColors(true)
-	status.SetBorder(true).SetTitle(" Package Info: " + name + " ")
-	status.SetText("[cyan]loading[-]")
-	pages.AddAndSwitchToPage("pkg-detail", status, true)
+	status.SetBorder(true).SetTitle(" " + name + " ")
+	stylePanel(status.Box)
+	status.SetText(fmt.Sprintf("\n  [%s]Loading package details…[-]", cInfo))
+
+	hints := []keyHint{commonBackHint}
+	pages.AddAndSwitchToPage("pkg-detail",
+		chrome(status, "Package Info › "+name, hints), true)
 
 	go func() {
 		pkg, err := libapt.Show(name)
 		app.QueueUpdateDraw(func() {
 			if err != nil {
-				status.SetText("[red]Could not find package[-]: " + name)
-				addBackHint(status)
+				status.SetText(fmt.Sprintf("\n  [%s::b]✗ Could not find package[-:-:-] %s\n", cError, name))
 				return
 			}
 
 			var b strings.Builder
-			b.WriteString(fmt.Sprintf("[green::b]%s[-]\n\n", pkg.Name))
-			b.WriteString(fmt.Sprintf("  %-20s %s\n", "Version:", pkg.Version))
+			b.WriteString(fmt.Sprintf("\n  [%s::b]%s[-:-:-]\n", cTitle, pkg.Name))
+			if pkg.Summary != "" {
+				b.WriteString(fmt.Sprintf("  [%s]%s[-]\n", cSubtext, pkg.Summary))
+			}
+			b.WriteString("\n")
+
+			row := func(k, v string) {
+				if v == "" {
+					return
+				}
+				b.WriteString(fmt.Sprintf("  [%s]%-16s[-] %s\n", cSubtext, k, v))
+			}
+			row("Version", pkg.Version)
 			if pkg.InstalledVersion != "" {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Installed:", pkg.InstalledVersion))
+				row("Installed", fmt.Sprintf("[%s]%s[-]", cSuccess, pkg.InstalledVersion))
 			} else {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Installed:", "(not installed)"))
+				row("Installed", fmt.Sprintf("[%s](not installed)[-]", cMuted))
 			}
-			b.WriteString(fmt.Sprintf("  %-20s %s\n", "Architecture:", pkg.Architecture))
-			if pkg.Section != "" {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Section:", pkg.Section))
-			}
-			if pkg.Priority != "" {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Priority:", pkg.Priority))
-			}
-			if pkg.Origin != "" {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Origin:", pkg.Origin))
-			}
-			if pkg.Maintainer != "" {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Maintainer:", pkg.Maintainer))
-			}
-			if pkg.Homepage != "" {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Homepage:", pkg.Homepage))
-			}
+			row("Architecture", pkg.Architecture)
+			row("Section", pkg.Section)
+			row("Priority", pkg.Priority)
+			row("Origin", pkg.Origin)
+			row("Maintainer", pkg.Maintainer)
+			row("Homepage", pkg.Homepage)
 			if pkg.PackageSize > 0 {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Download Size:", libapt.FormatSize(pkg.PackageSize)))
+				row("Download Size", libapt.FormatSize(pkg.PackageSize))
 			}
 			if pkg.InstalledSize > 0 {
-				b.WriteString(fmt.Sprintf("  %-20s %s\n", "Installed Size:", libapt.FormatSize(pkg.InstalledSize)))
+				row("Installed Size", libapt.FormatSize(pkg.InstalledSize))
 			}
+
 			if len(pkg.Depends) > 0 {
 				deps := make([]string, len(pkg.Depends))
 				for i, d := range pkg.Depends {
@@ -93,19 +101,23 @@ func showPkgDetails(app *tview.Application, pages *tview.Pages, name string) {
 						deps[i] = d.Name
 					}
 				}
-				b.WriteString(fmt.Sprintf("\n  [yellow]Dependencies:[-] %s\n", strings.Join(deps, ", ")))
+				b.WriteString(fmt.Sprintf("\n  [%s]Dependencies[-]\n", cSubtext))
+				b.WriteString(fmt.Sprintf("  %s\n", strings.Join(deps, ", ")))
 			}
+
 			if pkg.IsUpgradable {
-				b.WriteString(fmt.Sprintf("\n  [yellow::b]⚠ Upgrade available:[-] %s → %s\n", pkg.InstalledVersion, pkg.Version))
+				b.WriteString(fmt.Sprintf("\n  [%s::b]⚠ Upgrade available[-:-:-]  %s [%s]→[-] %s\n",
+					cWarning, pkg.InstalledVersion, cMuted, pkg.Version))
 			}
+
 			if pkg.Description != "" && pkg.Description != pkg.Summary {
-				b.WriteString(fmt.Sprintf("\n  %s\n", pkg.Description))
-			} else if pkg.Summary != "" {
-				b.WriteString(fmt.Sprintf("\n  %s\n", pkg.Summary))
+				b.WriteString(fmt.Sprintf("\n  [%s]Description[-]\n", cSubtext))
+				for _, line := range strings.Split(pkg.Description, "\n") {
+					b.WriteString("  " + line + "\n")
+				}
 			}
 
 			status.SetText(b.String())
-			addBackHint(status)
 		})
 	}()
 
@@ -124,34 +136,36 @@ func showPkgDetails(app *tview.Application, pages *tview.Pages, name string) {
 func showListUpgradable(app *tview.Application, pages *tview.Pages) {
 	status := tview.NewTextView().SetDynamicColors(true)
 	status.SetBorder(true).SetTitle(" Upgradable Packages ")
-	status.SetText("[cyan]loading[-]")
-	pages.AddAndSwitchToPage("upgradable", status, true)
+	stylePanel(status.Box)
+	status.SetText(fmt.Sprintf("\n  [%s]Checking for upgradable packages…[-]", cInfo))
+
+	hints := []keyHint{commonBackHint}
+	pages.AddAndSwitchToPage("upgradable",
+		chrome(status, "List Upgradable", hints), true)
 
 	go func() {
 		pkgs, err := libapt.ListUpgradable()
 		app.QueueUpdateDraw(func() {
 			if err != nil {
-				status.SetText("[red]Failed to list upgradable packages[-]")
-				addBackHint(status)
+				status.SetText(fmt.Sprintf("\n  [%s::b]✗ Failed to list upgradable packages[-:-:-]\n", cError))
 				return
 			}
 			if len(pkgs) == 0 {
-				status.SetText("[green]All packages are up to date![-]")
-				addBackHint(status)
+				status.SetText(fmt.Sprintf("\n  [%s::b]✓ All packages are up to date[-:-:-]\n", cSuccess))
 				return
 			}
 
 			var b strings.Builder
-			b.WriteString(fmt.Sprintf("[yellow::b]%d package(s) can be upgraded:[-]\n\n", len(pkgs)))
+			b.WriteString(fmt.Sprintf("\n  [%s::b]%d package(s) can be upgraded[-:-:-]\n\n", cWarning, len(pkgs)))
 			for _, p := range pkgs {
 				installed := p.InstalledVersion
 				if installed == "" {
 					installed = "?"
 				}
-				b.WriteString(fmt.Sprintf("  %-30s %s → %s\n", p.Name, installed, p.Version))
+				b.WriteString(fmt.Sprintf("  [%s]%-32s[-] %s [%s]→[-] [%s]%s[-]\n",
+					cText, p.Name, installed, cMuted, cSuccess, p.Version))
 			}
 			status.SetText(b.String())
-			addBackHint(status)
 		})
 	}()
 
@@ -171,7 +185,7 @@ func showPackageAction(app *tview.Application, pages *tview.Pages, title, label 
 	}
 
 	input := tview.NewInputField().SetLabel(label + ": ")
-	form := tview.NewForm()
+	form := styleForm(tview.NewForm())
 	form.AddFormItem(input)
 	form.AddButton("Run", func() {
 		text := strings.TrimSpace(input.GetText())
@@ -188,7 +202,9 @@ func showPackageAction(app *tview.Application, pages *tview.Pages, title, label 
 	})
 	form.SetBorder(true).SetTitle(" " + title + " ")
 
-	pages.AddAndSwitchToPage("form", centered(form, 70, 12), true)
+	hints := []keyHint{commonBackHint, {"tab", "next field"}, {"↵", "run"}}
+	pages.AddAndSwitchToPage("form",
+		chrome(centered(form, 70, 9), title, hints), true)
 }
 
 func runSyncUpgrade(app *tview.Application, pages *tview.Pages) {
@@ -196,31 +212,33 @@ func runSyncUpgrade(app *tview.Application, pages *tview.Pages) {
 		return
 	}
 	status := tview.NewTextView().SetDynamicColors(true)
-	status.SetBorder(true).SetTitle(" Running Sync + Upgrade ")
-	status.SetText("[cyan]fetching[-]")
-	pages.AddAndSwitchToPage("run", centered(status, 80, 18), true)
+	status.SetBorder(true).SetTitle(" Sync + Upgrade ")
+	stylePanel(status.Box)
+	status.SetText(fmt.Sprintf("\n  [%s]› Step 1/2 · Fetching package indexes…[-]", cInfo))
+
+	hints := []keyHint{commonBackHint}
+	pages.AddAndSwitchToPage("run",
+		chrome(centered(status, 90, 18), "Sync + Upgrade", hints), true)
 
 	go func() {
 		updateRes, updateErr := libapt.Update(false)
 		if updateErr != nil {
 			app.QueueUpdateDraw(func() {
-				status.SetText("[red]Update failed[-]\n\n" + updateRes.Output)
-				addBackHint(status)
+				status.SetText(fmt.Sprintf("\n  [%s::b]✗ Update failed[-:-:-]\n\n%s\n", cError, updateRes.Output))
 			})
 			return
 		}
 		app.QueueUpdateDraw(func() {
-			status.SetText("[cyan]upgrading[-]")
+			status.SetText(fmt.Sprintf("\n  [%s]› Step 2/2 · Upgrading packages…[-]", cInfo))
 		})
 
 		upgradeRes, upgradeErr := libapt.Upgrade(false)
 		app.QueueUpdateDraw(func() {
 			if upgradeErr != nil {
-				status.SetText("[red]Upgrade failed[-]\n\n" + upgradeRes.Output)
+				status.SetText(fmt.Sprintf("\n  [%s::b]✗ Upgrade failed[-:-:-]\n\n%s\n", cError, upgradeRes.Output))
 			} else {
-				status.SetText("[green]System upgraded successfully.[-]")
+				status.SetText(fmt.Sprintf("\n  [%s::b]✓ System upgraded successfully[-:-:-]\n", cSuccess))
 			}
-			addBackHint(status)
 		})
 	}()
 
@@ -237,8 +255,12 @@ func runSyncUpgrade(app *tview.Application, pages *tview.Pages) {
 func runOperation(app *tview.Application, pages *tview.Pages, title string, runner func() (*libapt.Result, error)) {
 	status := tview.NewTextView().SetDynamicColors(true)
 	status.SetBorder(true).SetTitle(" " + title + " ")
-	status.SetText("[cyan]working[-]")
-	pages.AddAndSwitchToPage("run", centered(status, 80, 18), true)
+	stylePanel(status.Box)
+	status.SetText(fmt.Sprintf("\n  [%s]› Working…[-]", cInfo))
+
+	hints := []keyHint{commonBackHint}
+	pages.AddAndSwitchToPage("run",
+		chrome(centered(status, 90, 18), title, hints), true)
 
 	go func() {
 		res, err := runner()
@@ -248,11 +270,10 @@ func runOperation(app *tview.Application, pages *tview.Pages, title string, runn
 				if out == "" {
 					out = err.Error()
 				}
-				status.SetText("[red]Operation failed[-]\n\n" + out)
+				status.SetText(fmt.Sprintf("\n  [%s::b]✗ Operation failed[-:-:-]\n\n%s\n", cError, out))
 			} else {
-				status.SetText("[green]Done successfully.[-]")
+				status.SetText(fmt.Sprintf("\n  [%s::b]✓ Done successfully[-:-:-]\n", cSuccess))
 			}
-			addBackHint(status)
 		})
 	}()
 

@@ -2,13 +2,9 @@ package tui
 
 import (
 	"strings"
+
 	"github.com/rivo/tview"
 )
-
-func addBackHint(tv *tview.TextView) {
-	current := tv.GetText(true)
-	tv.SetText(current + "\n\n[gray]Press Esc to go back[-]")
-}
 
 func centered(p tview.Primitive, width, height int) tview.Primitive {
 	return tview.NewFlex().

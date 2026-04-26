@@ -8,16 +8,15 @@ import (
 )
 
 func Run() error {
+	setupTheme()
+
 	app := tview.NewApplication()
 	pages := tview.NewPages()
 
-	header := tview.NewTextView().
-		SetDynamicColors(true).
-		SetText("[cyan::b]aether[-:-:-]  [gray]TUI mode • Enter to select • Esc to go back[-]")
-	header.SetBorder(true)
-
-	menu := tview.NewList().ShowSecondaryText(true)
+	menu := styleList(tview.NewList().ShowSecondaryText(true))
 	menu.SetBorder(true).SetTitle(" Actions ")
+	stylePanel(menu.Box)
+
 	menu.AddItem("Install package", "Equivalent to -S", 'i', func() { showPackageAction(app, pages, "Install package", "Package(s)", installRunner) })
 	menu.AddItem("Remove package", "Equivalent to -R", 'r', func() { showPackageAction(app, pages, "Remove package", "Package(s)", removeRunner) })
 	menu.AddItem("Purge package", "Remove + config files (-Rn)", 'p', func() { showPackageAction(app, pages, "Purge package", "Package(s)", purgeRunner) })
@@ -29,17 +28,20 @@ func Run() error {
 	menu.AddItem("List upgradable", "Show upgradable packages (-Qu)", 'l', func() { showListUpgradable(app, pages) })
 	menu.AddItem("Clean cache", "Remove cached packages (-Sc)", 'c', func() { runOperation(app, pages, "Clean cache", cleanRunner) })
 	menu.AddItem("Manage sources", "View/add/edit/delete APT sources", 'm', func() { showSources(app, pages) })
-	menu.AddItem("Quit", "Exit TUI", 'q', func() { app.Stop() })
+	menu.AddItem("Quit", "Exit aether", 'q', func() { app.Stop() })
 
 	if os.Geteuid() != 0 {
-		menu.SetTitle(" Actions (read-only without root) ")
+		menu.SetTitle(" Actions  ·  read-only without root ")
 	}
 
-	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(header, 3, 0, false).
-		AddItem(menu, 0, 1, true)
+	hints := []keyHint{
+		{"↑↓", "navigate"},
+		{"↵", "select"},
+		{"i/r/p…", "shortcut"},
+		{"q", "quit"},
+	}
 
-	pages.AddPage("menu", layout, true, true)
+	pages.AddPage("menu", chrome(menu, "Main Menu", hints), true, true)
 
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyCtrlC {
@@ -56,7 +58,7 @@ func ensureRoot(app *tview.Application, pages *tview.Pages) bool {
 	if os.Geteuid() == 0 {
 		return true
 	}
-	showInfoModal(app, pages, "Root required", "Run this mode with sudo for install/remove/update actions.")
+	showInfoModal(app, pages, "Root required", "Run aether with sudo to perform install, remove, or update actions.")
 	return false
 }
 
@@ -67,6 +69,7 @@ func showInfoModal(app *tview.Application, pages *tview.Pages, title, message st
 		SetDoneFunc(func(_ int, _ string) {
 			pages.RemovePage("modal")
 		})
-	modal.SetTitle(title).SetBorder(true)
+	styleModal(modal)
+	modal.SetTitle(" " + title + " ").SetBorder(true)
 	pages.AddPage("modal", modal, true, true)
 }

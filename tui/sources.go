@@ -11,42 +11,45 @@ import (
 )
 
 func showSources(app *tview.Application, pages *tview.Pages) {
-	sourcesList := tview.NewList().ShowSecondaryText(true)
+	sourcesList := styleList(tview.NewList().ShowSecondaryText(true))
 	sourcesList.SetBorder(true).SetTitle(" APT Sources ")
+	stylePanel(sourcesList.Box)
 
 	preview := tview.NewTextView().SetDynamicColors(true)
 	preview.SetBorder(true).SetTitle(" Details ")
+	stylePanel(preview.Box)
 
 	var currentEntries []libapt.SourceEntry
 
 	loadSources := func() {
 		sourcesList.Clear()
 		currentEntries = nil
-		preview.SetText("[gray]Loading sources...[-]")
+		preview.SetText(fmt.Sprintf("\n  [%s]Loading sources…[-]", cMuted))
 
 		entries, err := libapt.ListSources()
 		if err != nil {
-			preview.SetText(fmt.Sprintf("[red]Failed to load sources:[-]\n%v", err))
+			preview.SetText(fmt.Sprintf("\n  [%s::b]✗ Failed to load sources[-:-:-]\n  %v", cError, err))
 			return
 		}
 		currentEntries = entries
 
 		if len(entries) == 0 {
 			sourcesList.AddItem("(no sources found)", "", 0, nil)
-			preview.SetText("[yellow]No APT source entries found on this system.[-]")
+			preview.SetText(fmt.Sprintf("\n  [%s]No APT source entries found on this system.[-]", cMuted))
 			return
 		}
 
 		for _, e := range entries {
-			status := "[green]enabled[-]"
+			marker := fmt.Sprintf("[%s]●[-]", cSuccess)
 			if !e.Enabled {
-				status = "[red]disabled[-]"
+				marker = fmt.Sprintf("[%s]○[-]", cMuted)
 			}
-			primary := e.DisplayString()
-			secondary := fmt.Sprintf("%s  •  %s", status, filepath.Base(e.FilePath))
-			sourcesList.AddItem(primary, tview.TranslateANSI(secondary), 0, nil)
+			primary := fmt.Sprintf("%s  %s", marker, e.DisplayString())
+			secondary := fmt.Sprintf("[%s]%s[-]", cSubtext, filepath.Base(e.FilePath))
+			sourcesList.AddItem(primary, secondary, 0, nil)
 		}
 
+		sourcesList.SetTitle(fmt.Sprintf(" APT Sources · %d ", len(entries)))
 		if len(entries) > 0 {
 			sourcesList.SetCurrentItem(0)
 		}
@@ -54,46 +57,53 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 
 	renderPreview := func(idx int) {
 		if idx < 0 || idx >= len(currentEntries) {
-			preview.SetText("[gray]No source selected[-]")
+			preview.SetText(fmt.Sprintf("\n  [%s]No source selected[-]", cMuted))
 			return
 		}
 		e := currentEntries[idx]
 		var b strings.Builder
+		b.WriteString("\n")
 
 		if e.Enabled {
-			b.WriteString("[green::b]● Enabled[-]\n\n")
+			b.WriteString(fmt.Sprintf("  [%s::b]● Enabled[-:-:-]\n\n", cSuccess))
 		} else {
-			b.WriteString("[red::b]○ Disabled[-]\n\n")
+			b.WriteString(fmt.Sprintf("  [%s::b]○ Disabled[-:-:-]\n\n", cError))
 		}
 
-		b.WriteString(fmt.Sprintf("  [gray]Type:[-]        %s\n", e.Type))
-		b.WriteString(fmt.Sprintf("  [gray]URI:[-]         %s\n", e.URI))
-		b.WriteString(fmt.Sprintf("  [gray]Suite:[-]       %s\n", e.Suite))
+		row := func(k, v string) {
+			if v == "" {
+				return
+			}
+			b.WriteString(fmt.Sprintf("  [%s]%-12s[-] %s\n", cSubtext, k, v))
+		}
+		row("Type", e.Type)
+		row("URI", e.URI)
+		row("Suite", e.Suite)
 		if len(e.Components) > 0 {
-			b.WriteString(fmt.Sprintf("  [gray]Components:[-]  %s\n", strings.Join(e.Components, " ")))
+			row("Components", strings.Join(e.Components, " "))
 		}
 		if e.Options != "" {
-			b.WriteString(fmt.Sprintf("  [gray]Options:[-]     [%s]\n", e.Options))
+			row("Options", "["+e.Options+"]")
 		}
-		b.WriteString(fmt.Sprintf("\n  [gray]File:[-]        %s\n", e.FilePath))
+		b.WriteString("\n")
+		row("File", e.FilePath)
 		if e.LineNumber > 0 {
-			b.WriteString(fmt.Sprintf("  [gray]Line:[-]        %d\n", e.LineNumber))
+			row("Line", fmt.Sprintf("%d", e.LineNumber))
 		}
 		if e.IsDEB822 {
-			b.WriteString("  [gray]Format:[-]      DEB822 (.sources)\n")
+			row("Format", "DEB822 (.sources)")
 		} else {
-			b.WriteString("  [gray]Format:[-]      One-line (.list)\n")
+			row("Format", "One-line (.list)")
 		}
 
-		b.WriteString(fmt.Sprintf("\n  [gray]Raw:[-]\n  [dim]%s[-]\n", e.RawLine))
+		b.WriteString(fmt.Sprintf("\n  [%s]Raw[-]\n  [%s]%s[-]\n", cSubtext, cMuted, e.RawLine))
 		if e.IsDEB822 && e.DEB822Block != "" {
-			b.WriteString("\n  [gray]Stanza:[-]\n")
+			b.WriteString(fmt.Sprintf("\n  [%s]Stanza[-]\n", cSubtext))
 			for _, line := range strings.Split(e.DEB822Block, "\n") {
-				b.WriteString(fmt.Sprintf("  [dim]%s[-]\n", line))
+				b.WriteString(fmt.Sprintf("  [%s]%s[-]\n", cMuted, line))
 			}
 		}
 
-		b.WriteString("\n[gray]Enter: actions • a: add • e: edit file • Esc: back[-]")
 		preview.SetText(b.String())
 	}
 
@@ -101,7 +111,6 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 		renderPreview(index)
 	})
 
-	// Show action popup for selected source
 	showActionPopup := func(idx int) {
 		if idx < 0 || idx >= len(currentEntries) {
 			return
@@ -150,11 +159,12 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 						if sourcesList.GetItemCount() > 0 {
 							renderPreview(sourcesList.GetCurrentItem())
 						} else {
-							preview.SetText("[gray]No sources[-]")
+							preview.SetText(fmt.Sprintf("\n  [%s]No sources[-]", cMuted))
 						}
 					})
 				}
 			})
+		styleModal(modal)
 		modal.SetTitle(" Source Actions ").SetBorder(true)
 		pages.AddPage("source-action-modal", modal, true, true)
 	}
@@ -167,11 +177,7 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 		AddItem(sourcesList, 0, 1, true).
 		AddItem(preview, 0, 1, false)
 
-	sourcesPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(body, 0, 1, true)
-	sourcesPage.SetBorder(true).SetTitle(" Manage APT Sources (Enter: actions • a: add • e: edit file • Esc: back) ")
-
-	sourcesPage.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	body.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyEscape:
 			pages.SwitchToPage("menu")
@@ -204,7 +210,13 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 		return event
 	})
 
-	pages.AddAndSwitchToPage("sources", sourcesPage, true)
+	hints := []keyHint{
+		commonBackHint,
+		{"↵", "actions"},
+		{"a", "add"},
+		{"e", "edit file"},
+	}
+	pages.AddAndSwitchToPage("sources", chrome(body, "Manage APT Sources", hints), true)
 	loadSources()
 	if len(currentEntries) > 0 {
 		renderPreview(0)
@@ -213,7 +225,7 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 
 // showAddSourceForm shows a form to add a new APT source entry.
 func showAddSourceForm(app *tview.Application, pages *tview.Pages, onDone func()) {
-	form := tview.NewForm()
+	form := styleForm(tview.NewForm())
 
 	form.AddDropDown("Type", []string{"deb", "deb-src"}, 0, nil)
 	form.AddInputField("URI", "http://", 60, nil, nil)
@@ -271,7 +283,7 @@ func showAddSourceForm(app *tview.Application, pages *tview.Pages, onDone func()
 
 // showEditSourceForm shows a form pre-filled with source entry data for editing.
 func showEditSourceForm(app *tview.Application, pages *tview.Pages, entry *libapt.SourceEntry, onDone func()) {
-	form := tview.NewForm()
+	form := styleForm(tview.NewForm())
 
 	typeIdx := 0
 	if entry.Type == "deb-src" {
@@ -353,6 +365,7 @@ func showDeleteConfirm(app *tview.Application, pages *tview.Pages, entry libapt.
 				onDone()
 			}
 		})
+	styleModal(modal)
 	modal.SetTitle(" Confirm Delete ").SetBorder(true)
 	pages.AddPage("delete-confirm", modal, true, true)
 }
@@ -370,8 +383,9 @@ func showFileEditor(app *tview.Application, pages *tview.Pages, onDone func()) {
 		return
 	}
 
-	fileList := tview.NewList().ShowSecondaryText(false)
+	fileList := styleList(tview.NewList().ShowSecondaryText(false))
 	fileList.SetBorder(true).SetTitle(" Select Source File to Edit ")
+	stylePanel(fileList.Box)
 
 	for _, f := range files {
 		filePath := f
@@ -403,22 +417,19 @@ func openFileInEditor(app *tview.Application, pages *tview.Pages, path string, o
 
 	editor := tview.NewTextArea()
 	editor.SetText(content, true)
-	editor.SetBorder(true).SetTitle(fmt.Sprintf(" Editing: %s ", path))
+	editor.SetBorder(true).SetTitle(fmt.Sprintf(" %s ", path))
+	stylePanel(editor.Box)
+	editor.SetTextStyle(tcell.StyleDefault.Foreground(colText))
 
-	helpBar := tview.NewTextView().SetDynamicColors(true)
-	helpBar.SetText("[yellow]Ctrl+S[-]: Save  [yellow]Esc[-]: Cancel without saving")
-	helpBar.SetBorder(false)
+	hints := []keyHint{
+		{"ctrl+s", "save"},
+		{"esc", "cancel"},
+	}
 
-	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(editor, 0, 1, true).
-		AddItem(helpBar, 1, 0, false)
+	editorPage := chrome(editor, "Editing: "+filepath.Base(path), hints)
 
-	editorPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(layout, 0, 1, true)
-
-	editorPage.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	editor.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
-			// Confirm discard if content changed
 			newContent := editor.GetText()
 			if newContent != content {
 				modal := tview.NewModal().
@@ -430,6 +441,7 @@ func openFileInEditor(app *tview.Application, pages *tview.Pages, path string, o
 							pages.RemovePage("file-editor")
 						}
 					})
+				styleModal(modal)
 				modal.SetTitle(" Unsaved Changes ").SetBorder(true)
 				pages.AddPage("discard-confirm", modal, true, true)
 			} else {
@@ -438,7 +450,6 @@ func openFileInEditor(app *tview.Application, pages *tview.Pages, path string, o
 			return nil
 		}
 
-		// Ctrl+S to save
 		if event.Key() == tcell.KeyCtrlS {
 			if !ensureRoot(app, pages) {
 				return nil
@@ -451,7 +462,6 @@ func openFileInEditor(app *tview.Application, pages *tview.Pages, path string, o
 				return nil
 			}
 
-			// Update the reference so next Esc check sees no changes
 			content = newContent
 
 			modal := tview.NewModal().
@@ -464,6 +474,7 @@ func openFileInEditor(app *tview.Application, pages *tview.Pages, path string, o
 						onDone()
 					}
 				})
+			styleModal(modal)
 			modal.SetTitle(" Saved ").SetBorder(true)
 			pages.AddPage("save-confirm", modal, true, true)
 			return nil

@@ -14,12 +14,23 @@ import (
 )
 
 func showSearch(app *tview.Application, pages *tview.Pages) {
-	input := tview.NewInputField().SetLabel("Search: ")
-	results := tview.NewList().ShowSecondaryText(true)
-	results.SetBorder(true).SetTitle(" Results (↑/↓ navigate, Enter install, Tab switch focus) ")
+	input := tview.NewInputField().
+		SetLabel("  ").
+		SetPlaceholder("Type to search packages…").
+		SetFieldBackgroundColor(tcell.ColorDefault).
+		SetFieldTextColor(colText).
+		SetPlaceholderTextColor(colMuted)
+	input.SetBorder(true).SetTitle(" 🔍  Search ")
+	stylePanel(input.Box)
+
+	results := styleList(tview.NewList().ShowSecondaryText(true))
+	results.SetBorder(true).SetTitle(" Results ")
+	stylePanel(results.Box)
+
 	details := tview.NewTextView().SetDynamicColors(true)
 	details.SetBorder(true).SetTitle(" Details ")
-	details.SetText("Type to search packages...")
+	stylePanel(details.Box)
+	details.SetText(fmt.Sprintf("\n  [%s]Type a query to search packages.[-]", cMuted))
 
 	var mu sync.Mutex
 	var cancel context.CancelFunc
@@ -29,57 +40,65 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 
 	renderDetails := func(idx int) {
 		if idx < 0 || idx >= len(activeResults) {
-			details.SetText("No package selected")
+			details.SetText(fmt.Sprintf("\n  [%s]No package selected[-]", cMuted))
 			return
 		}
 		r := activeResults[idx]
-		// Show basic info immediately, then fetch full details in background
 		details.SetText(fmt.Sprintf(
-			"[green::b]%s[-]\n[gray]repo:[-] %s\n[gray]version:[-] %s\n[gray]arch:[-] %s\n\n%s\n\n[gray]Loading full details...[-]",
-			r.name, r.repo, r.version, r.arch, r.description,
+			"\n  [%s::b]%s[-:-:-]\n  [%s]%s · %s · %s[-]\n\n  [%s]%s[-]\n\n  [%s]Loading full details…[-]",
+			cTitle, r.name,
+			cSubtext, r.repo, r.version, r.arch,
+			cText, r.description,
+			cMuted,
 		))
 
-		// Fetch rich package info asynchronously (like python-apt Package properties)
 		go func(name string) {
 			pkg, err := libapt.Show(name)
 			app.QueueUpdateDraw(func() {
-				// make sure we're still looking at the same package
 				cur := results.GetCurrentItem()
 				if cur < 0 || cur >= len(activeResults) || activeResults[cur].name != name {
 					return
 				}
 				if err != nil || pkg == nil {
 					details.SetText(fmt.Sprintf(
-						"[green::b]%s[-]\n[gray]repo:[-] %s\n[gray]version:[-] %s\n[gray]arch:[-] %s\n\n%s\n\n[gray]Press Enter to install selected package[-]",
-						r.name, r.repo, r.version, r.arch, r.description,
+						"\n  [%s::b]%s[-:-:-]\n  [%s]%s · %s · %s[-]\n\n  [%s]%s[-]",
+						cTitle, r.name,
+						cSubtext, r.repo, r.version, r.arch,
+						cText, r.description,
 					))
 					return
 				}
 
 				var b strings.Builder
-				b.WriteString(fmt.Sprintf("[green::b]%s[-]\n\n", pkg.Name))
-				b.WriteString(fmt.Sprintf("  [gray]Version:[-]       %s\n", pkg.Version))
+				b.WriteString(fmt.Sprintf("\n  [%s::b]%s[-:-:-]\n", cTitle, pkg.Name))
+				if pkg.Summary != "" {
+					b.WriteString(fmt.Sprintf("  [%s]%s[-]\n", cSubtext, pkg.Summary))
+				}
+				b.WriteString("\n")
+
+				row := func(k, v string) {
+					if v == "" {
+						return
+					}
+					b.WriteString(fmt.Sprintf("  [%s]%-14s[-] %s\n", cSubtext, k, v))
+				}
+				row("Version", pkg.Version)
 				if pkg.InstalledVersion != "" {
-					b.WriteString(fmt.Sprintf("  [gray]Installed:[-]     %s\n", pkg.InstalledVersion))
+					row("Installed", fmt.Sprintf("[%s]%s[-]", cSuccess, pkg.InstalledVersion))
 				} else {
-					b.WriteString("  [gray]Installed:[-]     (not installed)\n")
+					row("Installed", fmt.Sprintf("[%s](not installed)[-]", cMuted))
 				}
-				b.WriteString(fmt.Sprintf("  [gray]Architecture:[-]  %s\n", pkg.Architecture))
-				if pkg.Section != "" {
-					b.WriteString(fmt.Sprintf("  [gray]Section:[-]       %s\n", pkg.Section))
-				}
-				if pkg.Origin != "" {
-					b.WriteString(fmt.Sprintf("  [gray]Origin:[-]        %s\n", pkg.Origin))
-				}
-				if pkg.Homepage != "" {
-					b.WriteString(fmt.Sprintf("  [gray]Homepage:[-]      %s\n", pkg.Homepage))
-				}
+				row("Architecture", pkg.Architecture)
+				row("Section", pkg.Section)
+				row("Origin", pkg.Origin)
+				row("Homepage", pkg.Homepage)
 				if pkg.PackageSize > 0 {
-					b.WriteString(fmt.Sprintf("  [gray]Download:[-]      %s\n", libapt.FormatSize(pkg.PackageSize)))
+					row("Download", libapt.FormatSize(pkg.PackageSize))
 				}
 				if pkg.InstalledSize > 0 {
-					b.WriteString(fmt.Sprintf("  [gray]Installed Size:[-] %s\n", libapt.FormatSize(pkg.InstalledSize)))
+					row("Install Size", libapt.FormatSize(pkg.InstalledSize))
 				}
+
 				if len(pkg.Depends) > 0 {
 					deps := make([]string, 0, len(pkg.Depends))
 					for _, d := range pkg.Depends {
@@ -89,17 +108,19 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 							deps = append(deps, d.Name)
 						}
 					}
-					b.WriteString(fmt.Sprintf("\n  [yellow]Depends:[-] %s\n", strings.Join(deps, ", ")))
+					b.WriteString(fmt.Sprintf("\n  [%s]Depends[-]\n  %s\n", cSubtext, strings.Join(deps, ", ")))
 				}
 				if pkg.IsUpgradable {
-					b.WriteString(fmt.Sprintf("\n  [yellow::b]⚠ Upgrade available:[-] %s → %s\n", pkg.InstalledVersion, pkg.Version))
+					b.WriteString(fmt.Sprintf("\n  [%s::b]⚠ Upgrade available[-:-:-]  %s [%s]→[-] %s\n",
+						cWarning, pkg.InstalledVersion, cMuted, pkg.Version))
 				}
 				if pkg.Description != "" && pkg.Description != pkg.Summary {
-					b.WriteString(fmt.Sprintf("\n  %s\n", pkg.Description))
-				} else if pkg.Summary != "" {
-					b.WriteString(fmt.Sprintf("\n  %s\n", pkg.Summary))
+					b.WriteString(fmt.Sprintf("\n  [%s]Description[-]\n", cSubtext))
+					for _, line := range strings.Split(pkg.Description, "\n") {
+						b.WriteString("  " + line + "\n")
+					}
 				}
-				b.WriteString("\n[gray]Press Enter to install • 'd' for remove • Esc to go back[-]")
+
 				details.SetText(b.String())
 			})
 		}(r.name)
@@ -126,6 +147,7 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 					return libapt.Install([]string{pkg.name}, false)
 				})
 			})
+		styleModal(modal)
 		modal.SetTitle(" Confirm Install ").SetBorder(true)
 		pages.AddPage("search-install-modal", modal, true, true)
 	}
@@ -142,7 +164,7 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 		if query == "" {
 			results.Clear()
 			activeResults = activeResults[:0]
-			details.SetText("Type to search packages...")
+			details.SetText(fmt.Sprintf("\n  [%s]Type a query to search packages.[-]", cMuted))
 			return
 		}
 
@@ -157,8 +179,8 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 		mu.Unlock()
 
 		results.Clear()
-		results.AddItem("Searching...", query, 0, nil)
-		details.SetText(fmt.Sprintf("Searching for [cyan]%s[-]", query))
+		results.AddItem("Searching…", query, 0, nil)
+		details.SetText(fmt.Sprintf("\n  [%s]Searching for[-] [%s::b]%s[-:-:-]…", cMuted, cInfo, query))
 
 		go func(localID int, localQuery string, localCtx context.Context) {
 			res, err := libapt.SearchContext(localCtx, []string{localQuery})
@@ -176,8 +198,8 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 				results.Clear()
 				if err != nil {
 					activeResults = activeResults[:0]
-					results.AddItem("Search failed", "See details panel", 0, nil)
-					details.SetText("[red]Search failed[-]\n\n" + strings.TrimSpace(res.Output))
+					results.AddItem("Search failed", "see details", 0, nil)
+					details.SetText(fmt.Sprintf("\n  [%s::b]✗ Search failed[-:-:-]\n\n%s", cError, strings.TrimSpace(res.Output)))
 					return
 				}
 
@@ -185,7 +207,7 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 				if len(parsed) == 0 {
 					activeResults = activeResults[:0]
 					results.AddItem("No packages found", localQuery, 0, nil)
-					details.SetText(fmt.Sprintf("[yellow]No packages found[-] for [cyan]%s[-]", localQuery))
+					details.SetText(fmt.Sprintf("\n  [%s]No packages found for[-] [%s::b]%s[-:-:-]", cMuted, cInfo, localQuery))
 					return
 				}
 
@@ -201,7 +223,7 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 
 				for i := 0; i < limit; i++ {
 					r := activeResults[i]
-					secondary := strings.TrimSpace(fmt.Sprintf("%s  %s  %s", r.repo, r.version, r.arch))
+					secondary := strings.TrimSpace(fmt.Sprintf("%s · %s · %s", r.repo, r.version, r.arch))
 					if secondary == "" {
 						secondary = r.description
 					}
@@ -209,9 +231,10 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 				}
 
 				if len(activeResults) > limit {
-					results.AddItem("…", fmt.Sprintf("%d more results (refine query)", len(activeResults)-limit), 0, nil)
+					results.AddItem("…", fmt.Sprintf("%d more results — refine query", len(activeResults)-limit), 0, nil)
 				}
 
+				results.SetTitle(fmt.Sprintf(" Results · %d ", len(activeResults)))
 				results.SetCurrentItem(0)
 				renderDetails(0)
 			})
@@ -238,7 +261,7 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 	searchFlex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(input, 3, 0, true).
 		AddItem(body, 0, 1, false)
-	searchFlex.SetBorder(true).SetTitle(" Live Search (-Ss) ")
+
 	searchFlex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyTAB:
@@ -286,6 +309,7 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 							})
 						}
 					})
+				styleModal(modal)
 				modal.SetTitle(" Confirm Remove ").SetBorder(true)
 				pages.AddPage("search-remove-modal", modal, true, true)
 			}
@@ -302,6 +326,13 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 		return event
 	})
 
-	pages.AddAndSwitchToPage("search", searchFlex, true)
+	hints := []keyHint{
+		commonBackHint,
+		{"tab", "switch focus"},
+		{"↑↓", "navigate"},
+		{"↵", "install"},
+		{"d", "remove"},
+	}
+	pages.AddAndSwitchToPage("search", chrome(searchFlex, "Search", hints), true)
 	app.SetFocus(input)
 }
