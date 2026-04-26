@@ -143,9 +143,7 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 				if buttonIndex != 0 || buttonLabel != "Install" {
 					return
 				}
-				runOperation(app, pages, "Install package", func() (*libapt.Result, error) {
-					return libapt.Install([]string{pkg.name}, false)
-				})
+				runStreamOperation(app, pages, "Install package", pkg.name, installStream([]string{pkg.name}))
 			})
 		styleModal(modal)
 		modal.SetTitle(" Confirm Install ").SetBorder(true)
@@ -300,13 +298,9 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 						pages.RemovePage("search-remove-modal")
 						switch buttonLabel {
 						case "Remove":
-							runOperation(app, pages, "Remove package", func() (*libapt.Result, error) {
-								return libapt.Remove([]string{pkg.name}, false)
-							})
+							runStreamOperation(app, pages, "Remove package", pkg.name, removeStream([]string{pkg.name}))
 						case "Purge":
-							runOperation(app, pages, "Purge package", func() (*libapt.Result, error) {
-								return libapt.Purge([]string{pkg.name}, false)
-							})
+							runStreamOperation(app, pages, "Purge package", pkg.name, purgeStream([]string{pkg.name}))
 						}
 					})
 				styleModal(modal)

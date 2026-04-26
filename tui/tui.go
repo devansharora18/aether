@@ -17,16 +17,28 @@ func Run() error {
 	menu.SetBorder(true).SetTitle(" Actions ")
 	stylePanel(menu.Box)
 
-	menu.AddItem("Install package", "Equivalent to -S", 'i', func() { showPackageAction(app, pages, "Install package", "Package(s)", installRunner) })
-	menu.AddItem("Remove package", "Equivalent to -R", 'r', func() { showPackageAction(app, pages, "Remove package", "Package(s)", removeRunner) })
-	menu.AddItem("Purge package", "Remove + config files (-Rn)", 'p', func() { showPackageAction(app, pages, "Purge package", "Package(s)", purgeRunner) })
-	menu.AddItem("Autoremove", "Remove unused dependencies (-Rc)", 'a', func() { runOperation(app, pages, "Autoremove", autoremoveRunner) })
-	menu.AddItem("Sync package database", "Equivalent to -Sy", 's', func() { runOperation(app, pages, "Sync package database", updateRunner) })
+	menu.AddItem("Install package", "Equivalent to -S", 'i', func() { showPackageAction(app, pages, "Install package", "Package(s)", installStream) })
+	menu.AddItem("Remove package", "Equivalent to -R", 'r', func() { showPackageAction(app, pages, "Remove package", "Package(s)", removeStream) })
+	menu.AddItem("Purge package", "Remove + config files (-Rn)", 'p', func() { showPackageAction(app, pages, "Purge package", "Package(s)", purgeStream) })
+	menu.AddItem("Autoremove", "Remove unused dependencies (-Rc)", 'a', func() {
+		if !ensureRoot(app, pages) {
+			return
+		}
+		runStreamOperation(app, pages, "Autoremove", "", autoremoveStream())
+	})
+	menu.AddItem("Sync package database", "Equivalent to -Sy", 's', func() {
+		if !ensureRoot(app, pages) {
+			return
+		}
+		runStreamOperation(app, pages, "Sync package database", "", updateStream())
+	})
 	menu.AddItem("Sync + Upgrade", "Equivalent to -Syu", 'u', func() { runSyncUpgrade(app, pages) })
 	menu.AddItem("Search packages", "Live results as you type", '/', func() { showSearch(app, pages) })
 	menu.AddItem("Package info", "Show detailed package info (-Qi)", 'd', func() { showPackageInfo(app, pages) })
 	menu.AddItem("List upgradable", "Show upgradable packages (-Qu)", 'l', func() { showListUpgradable(app, pages) })
-	menu.AddItem("Clean cache", "Remove cached packages (-Sc)", 'c', func() { runOperation(app, pages, "Clean cache", cleanRunner) })
+	menu.AddItem("Clean cache", "Remove cached packages (-Sc)", 'c', func() {
+		runStreamOperation(app, pages, "Clean cache", "", cleanStream())
+	})
 	menu.AddItem("Manage sources", "View/add/edit/delete APT sources", 'm', func() { showSources(app, pages) })
 	menu.AddItem("Quit", "Exit aether", 'q', func() { app.Stop() })
 

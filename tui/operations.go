@@ -9,14 +9,43 @@ import (
 	"github.com/rivo/tview"
 )
 
-// runner adapters used by the top-level menu to keep Run() simple
-func installRunner(pkgs []string) (*libapt.Result, error) { return libapt.Install(pkgs, false) }
-func removeRunner(pkgs []string) (*libapt.Result, error)  { return libapt.Remove(pkgs, false) }
-func purgeRunner(pkgs []string) (*libapt.Result, error)   { return libapt.Purge(pkgs, false) }
-func updateRunner() (*libapt.Result, error)               { return libapt.Update(false) }
-func upgradeRunner() (*libapt.Result, error)              { return libapt.Upgrade(false) }
-func autoremoveRunner() (*libapt.Result, error)           { return libapt.AutoRemove(false) }
-func cleanRunner() (*libapt.Result, error)                { return libapt.Clean() }
+// streamRunner adapters used by the top-level menu — all run via apt-get with
+// APT::Status-Fd so the operation view can render real progress.
+func installStream(pkgs []string) streamRunner {
+	return func(p libapt.ProgressFn) (*libapt.Result, error) {
+		return libapt.InstallWithProgress(pkgs, p)
+	}
+}
+func removeStream(pkgs []string) streamRunner {
+	return func(p libapt.ProgressFn) (*libapt.Result, error) {
+		return libapt.RemoveWithProgress(pkgs, p)
+	}
+}
+func purgeStream(pkgs []string) streamRunner {
+	return func(p libapt.ProgressFn) (*libapt.Result, error) {
+		return libapt.PurgeWithProgress(pkgs, p)
+	}
+}
+func updateStream() streamRunner {
+	return func(p libapt.ProgressFn) (*libapt.Result, error) {
+		return libapt.UpdateWithProgress(p)
+	}
+}
+func upgradeStream() streamRunner {
+	return func(p libapt.ProgressFn) (*libapt.Result, error) {
+		return libapt.UpgradeWithProgress(p)
+	}
+}
+func autoremoveStream() streamRunner {
+	return func(p libapt.ProgressFn) (*libapt.Result, error) {
+		return libapt.AutoRemoveWithProgress(p)
+	}
+}
+func cleanStream() streamRunner {
+	return func(_ libapt.ProgressFn) (*libapt.Result, error) {
+		return libapt.Clean()
+	}
+}
 
 // showPackageInfo prompts for a package name and displays rich details.
 func showPackageInfo(app *tview.Application, pages *tview.Pages) {
@@ -179,7 +208,7 @@ func showListUpgradable(app *tview.Application, pages *tview.Pages) {
 	})
 }
 
-func showPackageAction(app *tview.Application, pages *tview.Pages, title, label string, runner func([]string) (*libapt.Result, error)) {
+func showPackageAction(app *tview.Application, pages *tview.Pages, title, label string, makeRunner func([]string) streamRunner) {
 	if !ensureRoot(app, pages) {
 		return
 	}
@@ -194,7 +223,7 @@ func showPackageAction(app *tview.Application, pages *tview.Pages, title, label 
 			return
 		}
 		pkgs := strings.Fields(text)
-		runOperation(app, pages, title, func() (*libapt.Result, error) { return runner(pkgs) })
+		runStreamOperation(app, pages, title, strings.Join(pkgs, " "), makeRunner(pkgs))
 	})
 	form.AddButton("Back", func() {
 		pages.SwitchToPage("menu")
@@ -207,82 +236,21 @@ func showPackageAction(app *tview.Application, pages *tview.Pages, title, label 
 		chrome(centered(form, 70, 9), title, hints), true)
 }
 
+// runSyncUpgrade chains update then upgrade through the streaming view.
 func runSyncUpgrade(app *tview.Application, pages *tview.Pages) {
 	if !ensureRoot(app, pages) {
 		return
 	}
-	status := tview.NewTextView().SetDynamicColors(true)
-	status.SetBorder(true).SetTitle(" Sync + Upgrade ")
-	stylePanel(status.Box)
-	status.SetText(fmt.Sprintf("\n  [%s]› Step 1/2 · Fetching package indexes…[-]", cInfo))
-
-	hints := []keyHint{commonBackHint}
-	pages.AddAndSwitchToPage("run",
-		chrome(centered(status, 90, 18), "Sync + Upgrade", hints), true)
-
-	go func() {
-		updateRes, updateErr := libapt.Update(false)
-		if updateErr != nil {
-			app.QueueUpdateDraw(func() {
-				status.SetText(fmt.Sprintf("\n  [%s::b]✗ Update failed[-:-:-]\n\n%s\n", cError, updateRes.Output))
-			})
-			return
+	combined := func(p libapt.ProgressFn) (*libapt.Result, error) {
+		updRes, err := libapt.UpdateWithProgress(p)
+		if err != nil {
+			return updRes, err
 		}
-		app.QueueUpdateDraw(func() {
-			status.SetText(fmt.Sprintf("\n  [%s]› Step 2/2 · Upgrading packages…[-]", cInfo))
-		})
-
-		upgradeRes, upgradeErr := libapt.Upgrade(false)
-		app.QueueUpdateDraw(func() {
-			if upgradeErr != nil {
-				status.SetText(fmt.Sprintf("\n  [%s::b]✗ Upgrade failed[-:-:-]\n\n%s\n", cError, upgradeRes.Output))
-			} else {
-				status.SetText(fmt.Sprintf("\n  [%s::b]✓ System upgraded successfully[-:-:-]\n", cSuccess))
-			}
-		})
-	}()
-
-	status.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
-			pages.SwitchToPage("menu")
-			pages.RemovePage("run")
-			return nil
+		// surface a phase boundary in the log
+		if p != nil {
+			p(libapt.ProgressEvent{Phase: libapt.PhaseLog, LogLine: "── upgrade ──"})
 		}
-		return event
-	})
-}
-
-func runOperation(app *tview.Application, pages *tview.Pages, title string, runner func() (*libapt.Result, error)) {
-	status := tview.NewTextView().SetDynamicColors(true)
-	status.SetBorder(true).SetTitle(" " + title + " ")
-	stylePanel(status.Box)
-	status.SetText(fmt.Sprintf("\n  [%s]› Working…[-]", cInfo))
-
-	hints := []keyHint{commonBackHint}
-	pages.AddAndSwitchToPage("run",
-		chrome(centered(status, 90, 18), title, hints), true)
-
-	go func() {
-		res, err := runner()
-		app.QueueUpdateDraw(func() {
-			if err != nil {
-				out := strings.TrimSpace(res.Output)
-				if out == "" {
-					out = err.Error()
-				}
-				status.SetText(fmt.Sprintf("\n  [%s::b]✗ Operation failed[-:-:-]\n\n%s\n", cError, out))
-			} else {
-				status.SetText(fmt.Sprintf("\n  [%s::b]✓ Done successfully[-:-:-]\n", cSuccess))
-			}
-		})
-	}()
-
-	status.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
-			pages.SwitchToPage("menu")
-			pages.RemovePage("run")
-			return nil
-		}
-		return event
-	})
+		return libapt.UpgradeWithProgress(p)
+	}
+	runStreamOperation(app, pages, "Sync + Upgrade", "", combined)
 }

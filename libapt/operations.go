@@ -174,3 +174,60 @@ func CountInstalled() (int, error) {
 func Clean() (*Result, error) {
     return run([]string{"clean"}, false)
 }
+
+// InstallWithProgress installs packages while emitting progress events.
+func InstallWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
+    args := append([]string{"install", "-y"}, pkgs...)
+    res, err := runWithProgress(args, onEvent)
+    if err != nil {
+        return res, classifyError("install", res.Output, err)
+    }
+    return res, nil
+}
+
+// RemoveWithProgress removes packages while emitting progress events.
+func RemoveWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
+    args := append([]string{"remove", "-y"}, pkgs...)
+    res, err := runWithProgress(args, onEvent)
+    if err != nil {
+        return res, classifyError("remove", res.Output, err)
+    }
+    return res, nil
+}
+
+// PurgeWithProgress remove+purge while emitting progress events.
+func PurgeWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
+    args := append([]string{"remove", "--purge", "-y"}, pkgs...)
+    res, err := runWithProgress(args, onEvent)
+    if err != nil {
+        return res, classifyError("purge", res.Output, err)
+    }
+    return res, nil
+}
+
+// UpdateWithProgress updates package indexes with progress events.
+func UpdateWithProgress(onEvent ProgressFn) (*Result, error) {
+    res, err := runWithProgress([]string{"update"}, onEvent)
+    if err != nil {
+        return res, classifyError("update", res.Output, err)
+    }
+    return res, nil
+}
+
+// UpgradeWithProgress upgrades packages with progress events.
+func UpgradeWithProgress(onEvent ProgressFn) (*Result, error) {
+    res, err := runWithProgress([]string{"upgrade", "-y"}, onEvent)
+    if err != nil {
+        return res, classifyError("upgrade", res.Output, err)
+    }
+    return res, nil
+}
+
+// AutoRemoveWithProgress autoremoves packages with progress events.
+func AutoRemoveWithProgress(onEvent ProgressFn) (*Result, error) {
+    res, err := runWithProgress([]string{"autoremove", "-y"}, onEvent)
+    if err != nil {
+        return res, classifyError("autoremove", res.Output, err)
+    }
+    return res, nil
+}
