@@ -30,14 +30,14 @@ type streamRunner func(libapt.ProgressFn) (*libapt.Result, error)
 type opState struct {
 	mu sync.Mutex
 
-	title     string
-	subtitle  string // package name or extra context
+	title    string
+	subtitle string // package name or extra context
 
-	phase       libapt.Phase
-	statusText  string // current step description
-	currentPkg  string
-	percent     float64
-	indeterm    bool
+	phase      libapt.Phase
+	statusText string // current step description
+	currentPkg string
+	percent    float64
+	indeterm   bool
 
 	dlSize    string
 	afterSize string
