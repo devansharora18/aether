@@ -2,9 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/devansharora18/aether/libapt"
 	"github.com/gdamore/tcell/v2"
@@ -109,6 +111,253 @@ func renderIndeterminateBar(width int) string {
 	return fmt.Sprintf("[%s]%s[-]", cBorder, strings.Repeat("░", width))
 }
 
+// cleanAPTCache removes cached .deb files
+func cleanAPTCache() error {
+	_, err := libapt.Clean()
+	return err
+}
+
+// cleanAPTCacheWithProgress removes cached .deb files and reports progress
+func cleanAPTCacheWithProgress(onProgress func(string)) error {
+	onProgress("Cleaning apt cache…")
+	_, err := libapt.Clean()
+	if err == nil {
+		onProgress("Cache cleaned successfully")
+	}
+	return err
+}
+
+// removeLockFile removes the APT lock files by killing any held processes first
+func removeLockFile() error {
+	// Kill any apt/apt-get processes that might be holding the lock
+	killCmds := [][]string{
+		{"sudo", "killall", "-9", "apt-get"},
+		{"sudo", "killall", "-9", "apt"},
+		{"sudo", "killall", "-9", "dpkg"},
+	}
+
+	for _, killCmd := range killCmds {
+		exec.Command(killCmd[0], killCmd[1:]...).Run() // ignore errors, might not be running
+	}
+
+	// Wait a moment for processes to die
+	time.Sleep(500 * time.Millisecond)
+
+	// Now remove the lock files
+	lockFiles := []string{
+		"/var/lib/apt/apt.conf.d/lock-frontend",
+		"/var/lib/dpkg/lock-frontend",
+		"/var/lib/dpkg/lock",
+		"/var/cache/apt/archives/lock",
+	}
+
+	var lastErr error
+	for _, lockFile := range lockFiles {
+		cmd := exec.Command("sudo", "rm", "-f", lockFile)
+		if err := cmd.Run(); err != nil {
+			lastErr = err
+		}
+	}
+
+	return lastErr
+}
+
+// removeLockFileWithProgress removes lock files and reports progress
+func removeLockFileWithProgress(onProgress func(string)) error {
+	onProgress("Killing stale APT processes…")
+	killCmds := [][]string{
+		{"sudo", "killall", "-9", "apt-get"},
+		{"sudo", "killall", "-9", "apt"},
+		{"sudo", "killall", "-9", "dpkg"},
+	}
+
+	for _, killCmd := range killCmds {
+		exec.Command(killCmd[0], killCmd[1:]...).Run()
+	}
+
+	onProgress("Waiting for processes to terminate…")
+	time.Sleep(500 * time.Millisecond)
+
+	lockFiles := []string{
+		"/var/lib/apt/apt.conf.d/lock-frontend",
+		"/var/lib/dpkg/lock-frontend",
+		"/var/lib/dpkg/lock",
+		"/var/cache/apt/archives/lock",
+	}
+
+	onProgress(fmt.Sprintf("Removing %d lock files…", len(lockFiles)))
+	var lastErr error
+	for i, lockFile := range lockFiles {
+		onProgress(fmt.Sprintf("Removing lock files… [%d/%d]", i+1, len(lockFiles)))
+		cmd := exec.Command("sudo", "rm", "-f", lockFile)
+		if err := cmd.Run(); err != nil {
+			lastErr = err
+		}
+	}
+
+	onProgress("Lock removal complete")
+	return lastErr
+}
+
+// showErrorRecoveryModal displays options to recover from an error
+func showErrorRecoveryModal(app *tview.Application, pages *tview.Pages, onRetry func()) {
+	text := `An error occurred during the operation.
+
+Common causes:
+• APT cache is locked (process holding lock)
+• Stale lock files need cleanup
+
+Choose an action:
+[Auto-Fix & Retry] will kill any locked processes and
+clean up lock files before retrying automatically.`
+
+	modal := tview.NewModal().
+		SetText(text).
+		AddButtons([]string{"Auto-Fix & Retry", "Manual Fix", "Back"}).
+		SetDoneFunc(func(buttonIndex int, _ string) {
+			switch buttonIndex {
+			case 0: // Auto-Fix & Retry
+				pages.RemovePage("error-modal")
+				showOperationResult(app, pages, "Fixing Lock Issues", func(onProgress func(string)) error {
+					// Kill processes and remove locks
+					if err := removeLockFileWithProgress(onProgress); err != nil {
+						return err
+					}
+					// Also clean cache
+					return cleanAPTCacheWithProgress(onProgress)
+				}, onRetry)
+			case 1: // Manual Fix - show individual options
+				pages.RemovePage("error-modal")
+				showManualFixModal(app, pages, onRetry)
+			case 2: // Back
+				pages.RemovePage("error-modal")
+			}
+		})
+	styleModal(modal)
+	modal.SetTitle(" Error Recovery ").SetBorder(true)
+	pages.AddPage("error-modal", modal, true, true)
+}
+
+// showManualFixModal shows individual recovery options
+func showManualFixModal(app *tview.Application, pages *tview.Pages, onRetry func()) {
+	text := `Choose which recovery step to perform:
+
+• Clean Cache: Remove cached .deb files
+• Remove Lock: Kill processes and remove lock files
+• Retry: Start the operation again`
+
+	modal := tview.NewModal().
+		SetText(text).
+		AddButtons([]string{"Clean Cache", "Remove Lock", "Retry", "Back"}).
+		SetDoneFunc(func(buttonIndex int, _ string) {
+			switch buttonIndex {
+			case 0: // Clean Cache
+				pages.RemovePage("manual-modal")
+				showOperationResult(app, pages, "Cleaning Cache", func(onProgress func(string)) error {
+					return cleanAPTCacheWithProgress(onProgress)
+				}, nil)
+			case 1: // Remove Lock
+				pages.RemovePage("manual-modal")
+				showOperationResult(app, pages, "Removing Lock Files", func(onProgress func(string)) error {
+					return removeLockFileWithProgress(onProgress)
+				}, nil)
+			case 2: // Retry
+				pages.RemovePage("manual-modal")
+				onRetry()
+			case 3: // Back
+				pages.RemovePage("manual-modal")
+			}
+		})
+	styleModal(modal)
+	modal.SetTitle(" Manual Fix Options ").SetBorder(true)
+	pages.AddPage("manual-modal", modal, true, true)
+}
+
+// showOperationResult shows the result of a recovery operation with progress
+func showOperationResult(app *tview.Application, pages *tview.Pages, title string, operation func(func(string)) error, onSuccess func()) {
+	status := tview.NewTextView().SetDynamicColors(true)
+	status.SetBorder(true).SetTitle(" " + title + " ")
+	stylePanel(status.Box)
+	status.SetText(fmt.Sprintf("\n  [%s]Starting…[-]", cInfo))
+	status.SetChangedFunc(func() { app.Draw() })
+
+	hints := []keyHint{commonBackHint}
+	pages.AddAndSwitchToPage("op-result",
+		chrome(status, title, hints), true)
+
+	var progressMu sync.Mutex
+	var currentStatus string
+	var stepCount int
+
+	onProgress := func(msg string) {
+		progressMu.Lock()
+		currentStatus = msg
+		stepCount++
+		progressMu.Unlock()
+
+		app.QueueUpdateDraw(func() {
+			progressMu.Lock()
+			status_msg := currentStatus
+			progressMu.Unlock()
+
+			var b strings.Builder
+			b.WriteString("\n")
+
+			// Progress indicator with animation
+			frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+			frame := frames[stepCount%len(frames)]
+			b.WriteString(fmt.Sprintf("  [%s]%s[-] [%s::b]%s[-:-:-]\n\n", cInfo, frame, cInfo, status_msg))
+
+			// Progress bar
+			b.WriteString(fmt.Sprintf("  [%s]", cBorder))
+			for i := 0; i < 30; i++ {
+				if i < stepCount%30 {
+					b.WriteString("█")
+				} else {
+					b.WriteString("░")
+				}
+			}
+			b.WriteString("[-]\n")
+
+			status.SetText(b.String())
+		})
+	}
+
+	go func() {
+		err := operation(onProgress)
+		app.QueueUpdateDraw(func() {
+			if err != nil {
+				var b strings.Builder
+				b.WriteString(fmt.Sprintf("\n  [%s::b]✗ %s failed[-:-:-]\n\n", cError, title))
+				b.WriteString(fmt.Sprintf("  [%s]%s[-]\n", cMuted, err.Error()))
+				status.SetText(b.String())
+			} else {
+				var b strings.Builder
+				b.WriteString(fmt.Sprintf("\n  [%s::b]✓ %s succeeded[-:-:-]\n", cSuccess, title))
+				status.SetText(b.String())
+				// If onSuccess callback provided, call it after a short delay
+				if onSuccess != nil {
+					time.Sleep(1 * time.Second)
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("op-result")
+						onSuccess()
+					})
+					return
+				}
+			}
+		})
+	}()
+
+	status.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			pages.SwitchToPage("menu")
+			pages.RemovePage("op-result")
+			return nil
+		}
+		return event
+	})
+}
+
 // runStreamOperation creates a richly rendered operation view and runs the
 // streaming runner against it.
 func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subtitle string, runner streamRunner) {
@@ -211,73 +460,100 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 	hints := []keyHint{commonBackHint}
 	pages.AddAndSwitchToPage("run", chrome(container, title, hints), true)
 
-	onEvent := func(ev libapt.ProgressEvent) {
+	var startOperation func() // forward declaration for recursion
+
+	startOperation = func() {
+		// Reset state for potential retry
 		state.mu.Lock()
-		switch ev.Phase {
-		case libapt.PhaseDownload:
-			state.indeterm = false
-			state.phase = libapt.PhaseDownload
-			state.statusText = "Downloading"
-			state.percent = ev.Percent
-			if ev.Package != "" && ev.Package != "0" {
-				state.currentPkg = ev.Package
-			}
-			if ev.Description != "" {
-				state.appendLog(ev.Description)
-			}
-		case libapt.PhaseInstall:
-			state.indeterm = false
-			state.phase = libapt.PhaseInstall
-			state.statusText = "Installing"
-			state.percent = ev.Percent
-			state.currentPkg = ev.Package
-			if ev.Description != "" {
-				state.appendLog(ev.Description)
-			}
-		case libapt.PhaseError:
-			state.appendLog("✗ " + ev.Description)
-		case libapt.PhaseConfFile:
-			state.appendLog("conffile: " + ev.Description)
-		case libapt.PhaseLog:
-			state.scanLog(ev.LogLine)
-			state.appendLog(ev.LogLine)
-		}
+		state.finished = false
+		state.success = false
+		state.finalMsg = ""
+		state.log = []string{}
+		state.percent = 0
+		state.indeterm = true
+		state.statusText = ""
+		state.currentPkg = ""
 		state.mu.Unlock()
-		app.QueueUpdateDraw(func() {
-			renderLog()
-			renderProgress()
-		})
+
+		renderLog()
+		renderProgress()
+
+		onEvent := func(ev libapt.ProgressEvent) {
+			state.mu.Lock()
+			switch ev.Phase {
+			case libapt.PhaseDownload:
+				state.indeterm = false
+				state.phase = libapt.PhaseDownload
+				state.statusText = "Downloading"
+				state.percent = ev.Percent
+				if ev.Package != "" && ev.Package != "0" {
+					state.currentPkg = ev.Package
+				}
+				if ev.Description != "" {
+					state.appendLog(ev.Description)
+				}
+			case libapt.PhaseInstall:
+				state.indeterm = false
+				state.phase = libapt.PhaseInstall
+				state.statusText = "Installing"
+				state.percent = ev.Percent
+				state.currentPkg = ev.Package
+				if ev.Description != "" {
+					state.appendLog(ev.Description)
+				}
+			case libapt.PhaseError:
+				state.appendLog("✗ " + ev.Description)
+			case libapt.PhaseConfFile:
+				state.appendLog("conffile: " + ev.Description)
+			case libapt.PhaseLog:
+				state.scanLog(ev.LogLine)
+				state.appendLog(ev.LogLine)
+			}
+			state.mu.Unlock()
+			app.QueueUpdateDraw(func() {
+				renderLog()
+				renderProgress()
+			})
+		}
+
+		go func() {
+			res, err := runner(onEvent)
+			state.mu.Lock()
+			state.finished = true
+			if err != nil {
+				state.success = false
+				state.finalMsg = "Operation failed"
+				out := strings.TrimSpace(res.Output)
+				if out == "" {
+					out = err.Error()
+				}
+				// surface error tail in log if not already there
+				tail := strings.Split(out, "\n")
+				if len(tail) > 5 {
+					tail = tail[len(tail)-5:]
+				}
+				for _, l := range tail {
+					state.appendLog(l)
+				}
+				state.mu.Unlock()
+				app.QueueUpdateDraw(func() {
+					renderLog()
+					renderProgress()
+					showErrorRecoveryModal(app, pages, startOperation)
+				})
+			} else {
+				state.success = true
+				state.finalMsg = "Done successfully"
+				state.mu.Unlock()
+				app.QueueUpdateDraw(func() {
+					renderLog()
+					renderProgress()
+				})
+			}
+		}()
 	}
 
-	go func() {
-		res, err := runner(onEvent)
-		state.mu.Lock()
-		state.finished = true
-		if err != nil {
-			state.success = false
-			state.finalMsg = "Operation failed"
-			out := strings.TrimSpace(res.Output)
-			if out == "" {
-				out = err.Error()
-			}
-			// surface error tail in log if not already there
-			tail := strings.Split(out, "\n")
-			if len(tail) > 5 {
-				tail = tail[len(tail)-5:]
-			}
-			for _, l := range tail {
-				state.appendLog(l)
-			}
-		} else {
-			state.success = true
-			state.finalMsg = "Done successfully"
-		}
-		state.mu.Unlock()
-		app.QueueUpdateDraw(func() {
-			renderLog()
-			renderProgress()
-		})
-	}()
+	startOperation()
 
 	container.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
