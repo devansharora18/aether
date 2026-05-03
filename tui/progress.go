@@ -215,24 +215,32 @@ clean up lock files before retrying automatically.`
 		SetText(text).
 		AddButtons([]string{"Auto-Fix & Retry", "Manual Fix", "Back"}).
 		SetDoneFunc(func(buttonIndex int, _ string) {
+			pages.RemovePage("error-modal")
+			
 			switch buttonIndex {
 			case 0: // Auto-Fix & Retry
-				pages.RemovePage("error-modal")
-				app.Draw()
-				showOperationResult(app, pages, "Fixing Lock Issues", func(onProgress func(string)) error {
-					// Kill processes and remove locks
-					if err := removeLockFileWithProgress(onProgress); err != nil {
-						return err
-					}
-					// Also clean cache
-					return cleanAPTCacheWithProgress(onProgress)
-				}, onRetry)
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					app.QueueUpdateDraw(func() {
+						showOperationResult(app, pages, "Fixing Lock Issues", func(onProgress func(string)) error {
+							// Kill processes and remove locks
+							if err := removeLockFileWithProgress(onProgress); err != nil {
+								return err
+							}
+							// Also clean cache
+							return cleanAPTCacheWithProgress(onProgress)
+						}, onRetry)
+					})
+				}()
 			case 1: // Manual Fix - show individual options
-				pages.RemovePage("error-modal")
-				app.Draw()
-				showManualFixModal(app, pages, onRetry)
-			case 2: // Back
-				pages.RemovePage("error-modal")
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					app.QueueUpdateDraw(func() {
+						showManualFixModal(app, pages, onRetry)
+					})
+				}()
+			case 2: // Back - just close the modal
+				// do nothing, modal is already removed
 			}
 		})
 	styleModal(modal)
@@ -252,25 +260,36 @@ func showManualFixModal(app *tview.Application, pages *tview.Pages, onRetry func
 		SetText(text).
 		AddButtons([]string{"Clean Cache", "Remove Lock", "Retry", "Back"}).
 		SetDoneFunc(func(buttonIndex int, _ string) {
+			pages.RemovePage("manual-modal")
+			
 			switch buttonIndex {
 			case 0: // Clean Cache
-				pages.RemovePage("manual-modal")
-				app.Draw()
-				showOperationResult(app, pages, "Cleaning Cache", func(onProgress func(string)) error {
-					return cleanAPTCacheWithProgress(onProgress)
-				}, nil)
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					app.QueueUpdateDraw(func() {
+						showOperationResult(app, pages, "Cleaning Cache", func(onProgress func(string)) error {
+							return cleanAPTCacheWithProgress(onProgress)
+						}, nil)
+					})
+				}()
 			case 1: // Remove Lock
-				pages.RemovePage("manual-modal")
-				app.Draw()
-				showOperationResult(app, pages, "Removing Lock Files", func(onProgress func(string)) error {
-					return removeLockFileWithProgress(onProgress)
-				}, nil)
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					app.QueueUpdateDraw(func() {
+						showOperationResult(app, pages, "Removing Lock Files", func(onProgress func(string)) error {
+							return removeLockFileWithProgress(onProgress)
+						}, nil)
+					})
+				}()
 			case 2: // Retry
-				pages.RemovePage("manual-modal")
-				app.Draw()
-				onRetry()
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					app.QueueUpdateDraw(func() {
+						onRetry()
+					})
+				}()
 			case 3: // Back
-				pages.RemovePage("manual-modal")
+				// just close the modal
 			}
 		})
 	styleModal(modal)
@@ -490,7 +509,7 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 
 		// Make sure we're on the run page
 		pages.SwitchToPage("run")
-		
+
 		renderLog()
 		renderProgress()
 
