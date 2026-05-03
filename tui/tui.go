@@ -40,6 +40,9 @@ func Run() error {
 		runStreamOperation(app, pages, "Clean cache", "", cleanStream())
 	})
 	menu.AddItem("Manage sources", "View/add/edit/delete APT sources", 'm', func() { showSources(app, pages) })
+	menu.AddItem("Background Operations", "View running downloads/updates", 'b', func() {
+		showActiveOperations(app, pages)
+	})
 	menu.AddItem("Quit", "Exit aether", 'q', func() { app.Stop() })
 
 	if os.Geteuid() != 0 {
@@ -49,7 +52,7 @@ func Run() error {
 	hints := []keyHint{
 		{"↑↓", "navigate"},
 		{"↵", "select"},
-		{"i/r/p…", "shortcut"},
+		{"b", "background"},
 		{"q", "quit"},
 	}
 

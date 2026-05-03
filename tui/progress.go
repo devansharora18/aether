@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -24,6 +25,34 @@ var (
 	reFreed     = regexp.MustCompile(`(?i)After this operation, ([^.]+?B) disk space will be freed`)
 	reSummary   = regexp.MustCompile(`(\d+)\s+upgraded,\s+(\d+)\s+newly installed,\s+(\d+)\s+to remove`)
 )
+
+// Background operations tracking
+var (
+	activeOpsMu sync.Mutex
+	activeOps   = make(map[string]*opState)
+)
+
+func addActiveOp(id string, op *opState) {
+	activeOpsMu.Lock()
+	activeOps[id] = op
+	activeOpsMu.Unlock()
+}
+
+func removeActiveOp(id string) {
+	activeOpsMu.Lock()
+	delete(activeOps, id)
+	activeOpsMu.Unlock()
+}
+
+func getActiveOps() map[string]*opState {
+	activeOpsMu.Lock()
+	defer activeOpsMu.Unlock()
+	result := make(map[string]*opState)
+	for k, v := range activeOps {
+		result[k] = v
+	}
+	return result
+}
 
 // streamRunner is a runner that emits libapt.ProgressEvent updates.
 type streamRunner func(libapt.ProgressFn) (*libapt.Result, error)
@@ -50,13 +79,20 @@ type opState struct {
 	finished bool
 	success  bool
 	finalMsg string
+
+	// Cancellation
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func newOpState(title, subtitle string) *opState {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &opState{
 		title:    title,
 		subtitle: subtitle,
 		indeterm: true,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 
@@ -216,7 +252,7 @@ clean up lock files before retrying automatically.`
 		AddButtons([]string{"Auto-Fix & Retry", "Manual Fix", "Back"}).
 		SetDoneFunc(func(buttonIndex int, _ string) {
 			pages.RemovePage("error-modal")
-			
+
 			switch buttonIndex {
 			case 0: // Auto-Fix & Retry
 				go func() {
@@ -261,7 +297,7 @@ func showManualFixModal(app *tview.Application, pages *tview.Pages, onRetry func
 		AddButtons([]string{"Clean Cache", "Remove Lock", "Retry", "Back"}).
 		SetDoneFunc(func(buttonIndex int, _ string) {
 			pages.RemovePage("manual-modal")
-			
+
 			switch buttonIndex {
 			case 0: // Clean Cache
 				go func() {
@@ -295,6 +331,75 @@ func showManualFixModal(app *tview.Application, pages *tview.Pages, onRetry func
 	styleModal(modal)
 	modal.SetTitle(" Manual Fix Options ").SetBorder(true)
 	pages.AddPage("manual-modal", modal, true, true)
+}
+
+// showActiveOperations displays all running background operations
+func showActiveOperations(app *tview.Application, pages *tview.Pages) {
+	list := tview.NewList()
+	styleList(list)
+	list.SetBorder(true).SetTitle(" Background Operations ")
+
+	updateList := func() {
+		list.Clear()
+		ops := getActiveOps()
+
+		if len(ops) == 0 {
+			list.AddItem("No active operations", "", 0, nil)
+			return
+		}
+
+		idx := 0
+		for _, op := range ops {
+			op.mu.Lock()
+			title := op.title
+			subtitle := op.subtitle
+			percent := op.percent
+			finished := op.finished
+			op.mu.Unlock()
+
+			var status string
+			if finished {
+				status = "✓ Completed"
+			} else {
+				status = fmt.Sprintf("⟳ %5.1f%%", percent)
+			}
+
+			displayText := fmt.Sprintf("%s %s", status, title)
+			if subtitle != "" {
+				displayText += fmt.Sprintf(" · %s", subtitle)
+			}
+
+			list.AddItem(displayText, "", rune('1'+idx), func() {
+				pages.RemovePage("active-ops")
+				pages.AddAndSwitchToPage("run-bg", pages.GetPage("run"), true)
+			})
+			idx++
+		}
+	}
+
+	updateList()
+
+	// Update periodically
+	go func() {
+		for {
+			time.Sleep(500 * time.Millisecond)
+			app.QueueUpdateDraw(func() {
+				updateList()
+			})
+		}
+	}()
+
+	hints := []keyHint{commonBackHint, {"↑↓", "navigate"}, {"↵", "view"}}
+	pages.AddAndSwitchToPage("active-ops", chrome(list, "Background Operations", hints), true)
+
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			pages.RemovePage("active-ops")
+			pages.SwitchToPage("menu")
+			return nil
+		}
+		return event
+	})
 }
 
 // showOperationResult shows the result of a recovery operation with progress
@@ -579,6 +684,7 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 			} else {
 				state.success = true
 				state.finalMsg = "Done successfully"
+							state.cancel()
 				state.mu.Unlock()
 				app.QueueUpdateDraw(func() {
 					renderLog()
@@ -590,12 +696,24 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 
 	startOperation()
 
+	opID := state.title + "-" + state.subtitle // unique ID for this operation
+	addActiveOp(opID, state)
+
 	container.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
+			// Just hide, don't close - keep running in background
 			pages.SwitchToPage("menu")
-			pages.RemovePage("run")
 			return nil
 		}
 		return event
 	})
+
+	// Cleanup when operation finishes
+	go func() {
+		<-state.ctx.Done()
+		if state.finished {
+			time.Sleep(2 * time.Second)
+		}
+		removeActiveOp(opID)
+	}()
 }
