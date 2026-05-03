@@ -684,7 +684,7 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 			} else {
 				state.success = true
 				state.finalMsg = "Done successfully"
-							state.cancel()
+				state.cancel()
 				state.mu.Unlock()
 				app.QueueUpdateDraw(func() {
 					renderLog()
