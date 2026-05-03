@@ -60,6 +60,7 @@ type streamRunner func(libapt.ProgressFn) (*libapt.Result, error)
 // opState holds everything the operation view renders.
 type opState struct {
 	mu sync.Mutex
+	id string
 
 	title    string
 	subtitle string // package name or extra context
@@ -79,6 +80,7 @@ type opState struct {
 	finished bool
 	success  bool
 	finalMsg string
+	canceled bool
 
 	// Cancellation
 	ctx    context.Context
@@ -94,6 +96,30 @@ func newOpState(title, subtitle string) *opState {
 		ctx:      ctx,
 		cancel:   cancel,
 	}
+}
+
+func cancelAptProcesses() {
+	// Best effort cancellation for apt/dpkg subprocesses spawned by operations.
+	for _, c := range [][]string{{"killall", "-2", "apt-get"}, {"killall", "-2", "apt"}, {"killall", "-2", "dpkg"}} {
+		exec.Command("sudo", c...).Run()
+	}
+}
+
+func cancelOperation(state *opState) {
+	state.mu.Lock()
+	if state.finished {
+		state.mu.Unlock()
+		return
+	}
+	state.canceled = true
+	state.finished = true
+	state.success = false
+	state.finalMsg = "Cancelled by user"
+	state.appendLog("operation cancelled by user")
+	state.mu.Unlock()
+
+	state.cancel()
+	cancelAptProcesses()
 }
 
 func (s *opState) appendLog(line string) {
@@ -338,9 +364,11 @@ func showActiveOperations(app *tview.Application, pages *tview.Pages) {
 	list := tview.NewList()
 	styleList(list)
 	list.SetBorder(true).SetTitle(" Background Operations ")
+	visibleOpIDs := make([]string, 0)
 
 	updateList := func() {
 		list.Clear()
+		visibleOpIDs = visibleOpIDs[:0]
 		ops := getActiveOps()
 
 		if len(ops) == 0 {
@@ -349,16 +377,19 @@ func showActiveOperations(app *tview.Application, pages *tview.Pages) {
 		}
 
 		idx := 0
-		for _, op := range ops {
+		for id, op := range ops {
 			op.mu.Lock()
 			title := op.title
 			subtitle := op.subtitle
 			percent := op.percent
 			finished := op.finished
+			canceled := op.canceled
 			op.mu.Unlock()
 
 			var status string
-			if finished {
+			if canceled {
+				status = "✗ Cancelled"
+			} else if finished {
 				status = "✓ Completed"
 			} else {
 				status = fmt.Sprintf("⟳ %5.1f%%", percent)
@@ -369,9 +400,11 @@ func showActiveOperations(app *tview.Application, pages *tview.Pages) {
 				displayText += fmt.Sprintf(" · %s", subtitle)
 			}
 
+			visibleOpIDs = append(visibleOpIDs, id)
 			list.AddItem(displayText, "", rune('1'+idx), func() {
 				pages.RemovePage("active-ops")
-				pages.AddAndSwitchToPage("run-bg", pages.GetPage("run"), true)
+				pages.ShowPage("run")
+				pages.SwitchToPage("run")
 			})
 			idx++
 		}
@@ -389,13 +422,46 @@ func showActiveOperations(app *tview.Application, pages *tview.Pages) {
 		}
 	}()
 
-	hints := []keyHint{commonBackHint, {"↑↓", "navigate"}, {"↵", "view"}}
+	hints := []keyHint{commonBackHint, {"↑↓", "navigate"}, {"↵", "view"}, {"c", "cancel"}, {"v", "view run"}}
 	pages.AddAndSwitchToPage("active-ops", chrome(list, "Background Operations", hints), true)
 
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
 			pages.RemovePage("active-ops")
 			pages.SwitchToPage("menu")
+			return nil
+		}
+		if event.Rune() == 'v' || event.Rune() == 'V' {
+			pages.ShowPage("run")
+			pages.SwitchToPage("run")
+			return nil
+		}
+		if event.Rune() == 'c' || event.Rune() == 'C' {
+			idx := list.GetCurrentItem()
+			if idx >= 0 && idx < len(visibleOpIDs) {
+				ops := getActiveOps()
+				if op, ok := ops[visibleOpIDs[idx]]; ok {
+					modal := tview.NewModal().
+						SetText("Cancel selected operation?").
+						AddButtons([]string{"Cancel Operation", "Keep Running"}).
+						SetDoneFunc(func(buttonIndex int, _ string) {
+							pages.RemovePage("cancel-op-modal")
+							if buttonIndex == 0 {
+								cancelOperation(op)
+								updateList()
+							}
+						})
+					styleModal(modal)
+					modal.SetTitle(" Confirm Cancel ").SetBorder(true)
+					pages.AddPage("cancel-op-modal", modal, true, true)
+				}
+			}
+			return nil
+		}
+		if event.Key() == tcell.KeyEnter {
+			if idx := list.GetCurrentItem(); idx >= 0 && idx < len(visibleOpIDs) {
+				pages.SwitchToPage("run")
+			}
 			return nil
 		}
 		return event
@@ -594,7 +660,7 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 	renderLog()
 	renderProgress()
 
-	hints := []keyHint{commonBackHint}
+	hints := []keyHint{commonBackHint, {"esc", "background"}}
 	pages.AddAndSwitchToPage("run", chrome(container, title, hints), true)
 
 	var startOperation func() // forward declaration for recursion
@@ -610,6 +676,7 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 		state.indeterm = true
 		state.statusText = ""
 		state.currentPkg = ""
+		state.canceled = false
 		state.mu.Unlock()
 
 		// Make sure we're on the run page
@@ -659,6 +726,14 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 		go func() {
 			res, err := runner(onEvent)
 			state.mu.Lock()
+			if state.canceled {
+				state.mu.Unlock()
+				app.QueueUpdateDraw(func() {
+					renderLog()
+					renderProgress()
+				})
+				return
+			}
 			state.finished = true
 			if err != nil {
 				state.success = false
@@ -684,25 +759,36 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 			} else {
 				state.success = true
 				state.finalMsg = "Done successfully"
-				state.cancel()
 				state.mu.Unlock()
 				app.QueueUpdateDraw(func() {
 					renderLog()
 					renderProgress()
 				})
 			}
+			state.cancel()
 		}()
 	}
 
 	startOperation()
 
 	opID := state.title + "-" + state.subtitle // unique ID for this operation
+	state.id = opID
 	addActiveOp(opID, state)
 
 	container.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
 			// Just hide, don't close - keep running in background
-			pages.SwitchToPage("menu")
+			state.mu.Lock()
+			if !state.finished {
+				state.appendLog("moved to background")
+			}
+			state.mu.Unlock()
+			go func() {
+				app.QueueUpdateDraw(func() {
+					pages.HidePage("run")
+					pages.SwitchToPage("menu")
+				})
+			}()
 			return nil
 		}
 		return event
