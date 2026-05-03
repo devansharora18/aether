@@ -218,6 +218,7 @@ clean up lock files before retrying automatically.`
 			switch buttonIndex {
 			case 0: // Auto-Fix & Retry
 				pages.RemovePage("error-modal")
+				app.Draw()
 				showOperationResult(app, pages, "Fixing Lock Issues", func(onProgress func(string)) error {
 					// Kill processes and remove locks
 					if err := removeLockFileWithProgress(onProgress); err != nil {
@@ -228,6 +229,7 @@ clean up lock files before retrying automatically.`
 				}, onRetry)
 			case 1: // Manual Fix - show individual options
 				pages.RemovePage("error-modal")
+				app.Draw()
 				showManualFixModal(app, pages, onRetry)
 			case 2: // Back
 				pages.RemovePage("error-modal")
@@ -253,16 +255,19 @@ func showManualFixModal(app *tview.Application, pages *tview.Pages, onRetry func
 			switch buttonIndex {
 			case 0: // Clean Cache
 				pages.RemovePage("manual-modal")
+				app.Draw()
 				showOperationResult(app, pages, "Cleaning Cache", func(onProgress func(string)) error {
 					return cleanAPTCacheWithProgress(onProgress)
 				}, nil)
 			case 1: // Remove Lock
 				pages.RemovePage("manual-modal")
+				app.Draw()
 				showOperationResult(app, pages, "Removing Lock Files", func(onProgress func(string)) error {
 					return removeLockFileWithProgress(onProgress)
 				}, nil)
 			case 2: // Retry
 				pages.RemovePage("manual-modal")
+				app.Draw()
 				onRetry()
 			case 3: // Back
 				pages.RemovePage("manual-modal")
@@ -325,6 +330,7 @@ func showOperationResult(app *tview.Application, pages *tview.Pages, title strin
 
 	go func() {
 		err := operation(onProgress)
+		successCallback := onSuccess // capture callback
 		app.QueueUpdateDraw(func() {
 			if err != nil {
 				var b strings.Builder
@@ -335,14 +341,21 @@ func showOperationResult(app *tview.Application, pages *tview.Pages, title strin
 				var b strings.Builder
 				b.WriteString(fmt.Sprintf("\n  [%s::b]✓ %s succeeded[-:-:-]\n", cSuccess, title))
 				status.SetText(b.String())
-				// If onSuccess callback provided, call it after a short delay
-				if onSuccess != nil {
-					time.Sleep(1 * time.Second)
-					app.QueueUpdateDraw(func() {
-						pages.RemovePage("op-result")
-						onSuccess()
-					})
-					return
+
+				// If onSuccess callback provided, schedule it for after a delay
+				if successCallback != nil {
+					go func() {
+						time.Sleep(1 * time.Second)
+						app.QueueUpdateDraw(func() {
+							// Switch back to run page before removing op-result
+							if pages.HasPage("run") {
+								pages.SwitchToPage("run")
+							}
+							pages.RemovePage("op-result")
+							// Now call the success callback which will start the retry
+							successCallback()
+						})
+					}()
 				}
 			}
 		})
@@ -475,6 +488,9 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 		state.currentPkg = ""
 		state.mu.Unlock()
 
+		// Make sure we're on the run page
+		pages.SwitchToPage("run")
+		
 		renderLog()
 		renderProgress()
 
