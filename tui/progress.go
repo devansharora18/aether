@@ -114,17 +114,43 @@ func renderIndeterminateBar(width int) string {
 func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subtitle string, runner streamRunner) {
 	state := newOpState(title, subtitle)
 
-	view := tview.NewTextView().SetDynamicColors(true)
-	view.SetBorder(true)
-	stylePanel(view.Box)
+	// Log view: scrollable
+	logView := tview.NewTextView().SetDynamicColors(true)
+	logView.SetBorder(true)
+	stylePanel(logView.Box)
 	if subtitle != "" {
-		view.SetTitle(fmt.Sprintf(" %s · %s ", title, subtitle))
+		logView.SetTitle(fmt.Sprintf(" %s · %s ", title, subtitle))
 	} else {
-		view.SetTitle(" " + title + " ")
+		logView.SetTitle(" " + title + " ")
 	}
-	view.SetChangedFunc(func() { app.Draw() })
+	logView.SetChangedFunc(func() { app.Draw() })
 
-	render := func() {
+	// Progress bar view: fixed, non-scrollable
+	progressView := tview.NewTextView().SetDynamicColors(true)
+	progressView.SetBorder(true)
+	stylePanel(progressView.Box)
+	progressView.SetTitle(" Progress ")
+
+	// Container: log on top (scrollable), progress bar on bottom (fixed)
+	container := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(logView, 0, 1, true).
+		AddItem(progressView, 6, 0, false)
+
+	renderLog := func() {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("  [%s]── log ─────────────────────────────────────────────[-]\n", cBorder))
+		for _, line := range state.log {
+			b.WriteString(fmt.Sprintf("  [%s]%s[-]\n", cMuted, tview.Escape(line)))
+		}
+
+		logView.SetText(b.String())
+		logView.ScrollToEnd()
+	}
+
+	renderProgress := func() {
 		state.mu.Lock()
 		defer state.mu.Unlock()
 
@@ -176,20 +202,14 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 			b.WriteString(fmt.Sprintf("\n  %s\n", strings.Join(details, fmt.Sprintf("   [%s]·[-]   ", cBorder))))
 		}
 
-		// separator + log tail
-		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("  [%s]── log ─────────────────────────────────────────────[-]\n", cBorder))
-		for _, line := range state.log {
-			b.WriteString(fmt.Sprintf("  [%s]%s[-]\n", cMuted, tview.Escape(line)))
-		}
-
-		view.SetText(b.String())
-		view.ScrollToEnd()
+		progressView.SetText(b.String())
 	}
-	render()
+
+	renderLog()
+	renderProgress()
 
 	hints := []keyHint{commonBackHint}
-	pages.AddAndSwitchToPage("run", chrome(view, title, hints), true)
+	pages.AddAndSwitchToPage("run", chrome(container, title, hints), true)
 
 	onEvent := func(ev libapt.ProgressEvent) {
 		state.mu.Lock()
@@ -223,7 +243,10 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 			state.appendLog(ev.LogLine)
 		}
 		state.mu.Unlock()
-		app.QueueUpdateDraw(render)
+		app.QueueUpdateDraw(func() {
+			renderLog()
+			renderProgress()
+		})
 	}
 
 	go func() {
@@ -250,10 +273,13 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 			state.finalMsg = "Done successfully"
 		}
 		state.mu.Unlock()
-		app.QueueUpdateDraw(render)
+		app.QueueUpdateDraw(func() {
+			renderLog()
+			renderProgress()
+		})
 	}()
 
-	view.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	container.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
 			pages.SwitchToPage("menu")
 			pages.RemovePage("run")
