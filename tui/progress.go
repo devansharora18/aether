@@ -329,11 +329,12 @@ func showManualFixModal(app *tview.Application, pages *tview.Pages, onRetry func
 
 • Clean Cache: Remove cached .deb files
 • Remove Lock: Kill processes and remove lock files
+• Fix Broken: Repair unmet dependencies
 • Retry: Start the operation again`
 
 	modal := tview.NewModal().
 		SetText(text).
-		AddButtons([]string{"Clean Cache", "Remove Lock", "Retry", "Back"}).
+		AddButtons([]string{"Clean Cache", "Remove Lock", "Fix Broken", "Retry", "Back"}).
 		SetDoneFunc(func(buttonIndex int, _ string) {
 			pages.RemovePage("manual-modal")
 
@@ -360,10 +361,19 @@ func showManualFixModal(app *tview.Application, pages *tview.Pages, onRetry func
 				go func() {
 					time.Sleep(50 * time.Millisecond)
 					app.QueueUpdateDraw(func() {
+						showOperationResult(app, pages, "Fixing Broken Dependencies", func(onProgress func(string)) error {
+							return fixBrokenDependenciesWithProgress(onProgress)
+						}, nil)
+					})
+				}()
+			case 3: // Retry
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					app.QueueUpdateDraw(func() {
 						onRetry()
 					})
 				}()
-			case 3: // Back
+			case 4: // Back
 				// just close the modal
 			}
 		})
