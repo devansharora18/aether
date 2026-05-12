@@ -189,6 +189,16 @@ func cleanAPTCacheWithProgress(onProgress func(string)) error {
 	return err
 }
 
+// fixBrokenDependenciesWithProgress runs apt --fix-broken install.
+func fixBrokenDependenciesWithProgress(onProgress func(string)) error {
+	onProgress("Fixing broken dependencies…")
+	_, err := libapt.FixBrokenInstall(false)
+	if err == nil {
+		onProgress("Dependency repair completed")
+	}
+	return err
+}
+
 // removeLockFile removes the APT lock files by killing any held processes first
 func removeLockFile() error {
 	// Kill any apt/apt-get processes that might be holding the lock
@@ -268,10 +278,11 @@ func showErrorRecoveryModal(app *tview.Application, pages *tview.Pages, onRetry 
 Common causes:
 • APT cache is locked (process holding lock)
 • Stale lock files need cleanup
+• Unmet dependencies need repair
 
 Choose an action:
 [Auto-Fix & Retry] will kill any locked processes and
-clean up lock files before retrying automatically.`
+clean up lock files, clear cache, and repair dependencies before retrying automatically.`
 
 	modal := tview.NewModal().
 		SetText(text).
@@ -289,8 +300,10 @@ clean up lock files before retrying automatically.`
 							if err := removeLockFileWithProgress(onProgress); err != nil {
 								return err
 							}
-							// Also clean cache
-							return cleanAPTCacheWithProgress(onProgress)
+							if err := cleanAPTCacheWithProgress(onProgress); err != nil {
+								return err
+							}
+							return fixBrokenDependenciesWithProgress(onProgress)
 						}, onRetry)
 					})
 				}()
@@ -447,8 +460,12 @@ func showActiveOperations(app *tview.Application, pages *tview.Pages) {
 						SetDoneFunc(func(buttonIndex int, _ string) {
 							pages.RemovePage("cancel-op-modal")
 							if buttonIndex == 0 {
-								cancelOperation(op)
-								updateList()
+								go func() {
+									cancelOperation(op)
+									app.QueueUpdateDraw(func() {
+										updateList()
+									})
+								}()
 							}
 						})
 					styleModal(modal)
@@ -660,7 +677,7 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 	renderLog()
 	renderProgress()
 
-	hints := []keyHint{commonBackHint, {"esc", "background"}}
+	hints := []keyHint{commonBackHint, {"c", "cancel"}}
 	pages.AddAndSwitchToPage("run", chrome(container, title, hints), true)
 
 	var startOperation func() // forward declaration for recursion
@@ -787,6 +804,16 @@ func runStreamOperation(app *tview.Application, pages *tview.Pages, title, subti
 				app.QueueUpdateDraw(func() {
 					pages.HidePage("run")
 					pages.SwitchToPage("menu")
+				})
+			}()
+			return nil
+		}
+		if event.Rune() == 'c' || event.Rune() == 'C' {
+			go func() {
+				cancelOperation(state)
+				app.QueueUpdateDraw(func() {
+					renderLog()
+					renderProgress()
 				})
 			}()
 			return nil

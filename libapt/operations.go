@@ -175,6 +175,15 @@ func Clean() (*Result, error) {
     return run([]string{"clean"}, false)
 }
 
+// FixBrokenInstall attempts to repair broken dependencies.
+func FixBrokenInstall(stream bool) (*Result, error) {
+    res, err := run([]string{"--fix-broken", "install", "-y"}, stream)
+    if err != nil {
+        return res, classifyError("fix-broken", res.Output, err)
+    }
+    return res, nil
+}
+
 // InstallWithProgress installs packages while emitting progress events.
 func InstallWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
     args := append([]string{"install", "-y"}, pkgs...)
