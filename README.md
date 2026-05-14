@@ -2,6 +2,14 @@
 
 Aether is a modern, interactive Terminal User Interface (TUI) and command-line wrapper for the Debian/Ubuntu `apt` package manager, written in Go. It brings a `pacman`-like syntax and an intuitive graphical console to `apt`.
 
+<img width="1580" height="1078" alt="image" src="https://github.com/user-attachments/assets/d85e70bd-0efc-40b2-a4d4-18ca966e41e7" />
+<img width="1580" height="1078" alt="image" src="https://github.com/user-attachments/assets/23991c9f-9c3c-4613-8979-5abd16038b2d" />
+<img width="1580" height="1078" alt="image" src="https://github.com/user-attachments/assets/e6336117-455d-494c-944d-221c4d6c8c59" />
+<img width="1580" height="1078" alt="image" src="https://github.com/user-attachments/assets/8404bbce-2cae-4d2b-8f35-b8193ef62715" />
+<img width="1580" height="1078" alt="image" src="https://github.com/user-attachments/assets/6d1da09c-8a39-4be2-bfce-1c2f3bdeee11" />
+
+
+
 ## Features
 
 - **Interactive TUI**: Browse, search, install, and remove packages using a keyboard-driven visual interface.
