@@ -15,12 +15,27 @@ Aether is a modern, interactive Terminal User Interface (TUI) and command-line w
 
 Ensure you have a recent version of Go installed.
 
+### Quick Install (One-liner)
+
+```bash
+git clone https://github.com/devansharora18/aether.git /tmp/aether && cd /tmp/aether && ./install.sh && cd - && rm -rf /tmp/aether
+```
+
+### Curl Install (No Git)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devansharora18/aether/main/install-aether.sh | bash
+```
+
+### Manual Install
+
 ```bash
 git clone https://github.com/devansharora18/aether.git
 cd aether
-go build -o aether
-sudo mv aether /usr/local/bin/
+./install.sh
 ```
+
+You can customize the installation using script arguments (e.g., `./install.sh --prefix ~/.local --no-sudo`). Run `./install.sh --help` for all options.
 
 Or install directly via `go install`:
 
