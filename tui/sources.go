@@ -130,9 +130,6 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 
 				switch buttonLabel {
 				case "Enable", "Disable":
-					if !ensureRoot(app, pages) {
-						return
-					}
 					err := libapt.ToggleSource(entry)
 					if err != nil {
 						showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to toggle source:\n%v", err))
@@ -142,18 +139,12 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 					renderPreview(sourcesList.GetCurrentItem())
 
 				case "Edit":
-					if !ensureRoot(app, pages) {
-						return
-					}
 					showEditSourceForm(app, pages, &entry, func() {
 						loadSources()
 						renderPreview(sourcesList.GetCurrentItem())
 					})
 
 				case "Delete":
-					if !ensureRoot(app, pages) {
-						return
-					}
 					showDeleteConfirm(app, pages, entry, func() {
 						loadSources()
 						if sourcesList.GetItemCount() > 0 {
@@ -187,9 +178,6 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 
 		switch event.Rune() {
 		case 'a':
-			if !ensureRoot(app, pages) {
-				return nil
-			}
 			showAddSourceForm(app, pages, func() {
 				loadSources()
 				if sourcesList.GetItemCount() > 0 {
@@ -451,10 +439,6 @@ func openFileInEditor(app *tview.Application, pages *tview.Pages, path string, o
 		}
 
 		if event.Key() == tcell.KeyCtrlS {
-			if !ensureRoot(app, pages) {
-				return nil
-			}
-
 			newContent := editor.GetText()
 			err := libapt.WriteSourceFile(path, newContent)
 			if err != nil {

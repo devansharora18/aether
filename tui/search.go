@@ -130,9 +130,6 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 		if idx < 0 || idx >= len(activeResults) {
 			return
 		}
-		if !ensureRoot(app, pages) {
-			return
-		}
 
 		pkg := activeResults[idx]
 		modal := tview.NewModal().
@@ -287,9 +284,6 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 		if app.GetFocus() == results && event.Rune() == 'd' {
 			idx := results.GetCurrentItem()
 			if idx >= 0 && idx < len(activeResults) {
-				if !ensureRoot(app, pages) {
-					return nil
-				}
 				pkg := activeResults[idx]
 				modal := tview.NewModal().
 					SetText(fmt.Sprintf("Remove package '%s'?", pkg.name)).

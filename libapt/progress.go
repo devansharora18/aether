@@ -41,43 +41,80 @@ type ProgressFn func(ev ProgressEvent)
 // PhaseInstall / PhaseError events). The returned Result aggregates all log
 // output the same way run() does.
 func runWithProgress(args []string, onEvent ProgressFn) (*Result, error) {
+	return runWithProgressBinary("apt-get", args, onEvent, false)
+}
+
+func runWithProgressElevated(args []string, onEvent ProgressFn) (*Result, error) {
+	return runWithProgressBinary("apt-get", args, onEvent, true)
+}
+
+func runWithProgressBinary(binary string, args []string, onEvent ProgressFn, elevated bool) (*Result, error) {
 	if onEvent == nil {
+		if elevated {
+			return runElevated(args, false)
+		}
 		return run(args, false)
 	}
 
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		return run(args, false)
+	useStatusOnStdout := elevated && os.Geteuid() != 0
+	statusFd := "3"
+	if useStatusOnStdout {
+		statusFd = "1"
 	}
 
-	fullArgs := append([]string{"-o", "APT::Status-Fd=3", "-o", "Dpkg::Use-Pty=0"}, args...)
+	fullArgs := append([]string{"-o", "APT::Status-Fd=" + statusFd, "-o", "Dpkg::Use-Pty=0"}, args...)
+	cmdBinary := binary
+	cmdArgs := fullArgs
+	if elevated && os.Geteuid() != 0 {
+		cmdBinary = "sudo"
+		cmdArgs = append([]string{binary}, fullArgs...)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "apt-get", fullArgs...)
+	cmd := exec.CommandContext(ctx, cmdBinary, cmdArgs...)
 	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
-	cmd.ExtraFiles = []*os.File{pw}
+
+	var pr *os.File
+	if !useStatusOnStdout {
+		pipeReader, pipeWriter, err := os.Pipe()
+		if err != nil {
+			if elevated {
+				return runElevated(args, false)
+			}
+			return run(args, false)
+		}
+		pr = pipeReader
+		cmd.ExtraFiles = []*os.File{pipeWriter}
+		defer pipeWriter.Close()
+	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		pr.Close()
-		pw.Close()
+		if pr != nil {
+			pr.Close()
+		}
 		return &Result{Output: "", Err: err}, err
 	}
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		pr.Close()
-		pw.Close()
+		if pr != nil {
+			pr.Close()
+		}
 		return &Result{Output: "", Err: err}, err
 	}
 
 	if err := cmd.Start(); err != nil {
-		pr.Close()
-		pw.Close()
+		if pr != nil {
+			pr.Close()
+		}
 		return &Result{Output: "", Err: err}, err
 	}
-	pw.Close() // child has its own copy on FD 3
+	if pr != nil {
+		// child has its own copy on FD 3
+		defer pr.Close()
+	}
 
 	var (
 		bufMu sync.Mutex
@@ -93,14 +130,18 @@ func runWithProgress(args []string, onEvent ProgressFn) (*Result, error) {
 	var wg sync.WaitGroup
 	wg.Add(3)
 
-	go func() {
-		defer wg.Done()
-		s := bufio.NewScanner(pr)
-		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for s.Scan() {
-			onEvent(parseStatusFd(s.Text()))
-		}
-	}()
+	if pr != nil {
+		go func() {
+			defer wg.Done()
+			s := bufio.NewScanner(pr)
+			s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+			for s.Scan() {
+				onEvent(parseStatusFd(s.Text()))
+			}
+		}()
+	} else {
+		wg.Done()
+	}
 
 	go func() {
 		defer wg.Done()
@@ -108,6 +149,13 @@ func runWithProgress(args []string, onEvent ProgressFn) (*Result, error) {
 		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for s.Scan() {
 			line := s.Text()
+			if useStatusOnStdout {
+				ev := parseStatusFd(line)
+				if ev.Phase != PhaseLog {
+					onEvent(ev)
+					continue
+				}
+			}
 			writeLog(line)
 			onEvent(ProgressEvent{Phase: PhaseLog, LogLine: line})
 		}
@@ -125,7 +173,9 @@ func runWithProgress(args []string, onEvent ProgressFn) (*Result, error) {
 	}()
 
 	waitErr := cmd.Wait()
-	pr.Close()
+	if pr != nil {
+		pr.Close()
+	}
 	wg.Wait()
 
 	bufMu.Lock()

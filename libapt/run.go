@@ -9,8 +9,23 @@ import (
 )
 
 func run(args []string, stream bool) (*Result, error) {
+    return runCommand("apt", args, stream, false)
+}
+
+func runElevated(args []string, stream bool) (*Result, error) {
+    return runCommand("apt", args, stream, true)
+}
+
+func runCommand(binary string, args []string, stream bool, elevated bool) (*Result, error) {
+    cmdBinary := binary
+    cmdArgs := args
+    if elevated && os.Geteuid() != 0 {
+        cmdBinary = "sudo"
+        cmdArgs = append([]string{binary}, args...)
+    }
+
     if stream {
-        cmd := exec.Command("apt", args...)
+        cmd := exec.Command(cmdBinary, cmdArgs...)
         cmd.Stdout = os.Stdout
         cmd.Stderr = os.Stderr
         cmd.Stdin = os.Stdin
@@ -22,9 +37,10 @@ func run(args []string, stream bool) (*Result, error) {
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
     defer cancel()
 
-    cmd := exec.CommandContext(ctx, "apt", args...)
+    cmd := exec.CommandContext(ctx, cmdBinary, cmdArgs...)
     cmd.Stdout = &out
     cmd.Stderr = &out
+    cmd.Stdin = os.Stdin
     err := cmd.Run()
     return &Result{Output: out.String(), Err: err}, err
 }

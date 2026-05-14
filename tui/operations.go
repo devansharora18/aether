@@ -209,10 +209,6 @@ func showListUpgradable(app *tview.Application, pages *tview.Pages) {
 }
 
 func showPackageAction(app *tview.Application, pages *tview.Pages, title, label string, makeRunner func([]string) streamRunner) {
-	if !ensureRoot(app, pages) {
-		return
-	}
-
 	input := tview.NewInputField().SetLabel(label + ": ")
 	form := styleForm(tview.NewForm())
 	form.AddFormItem(input)
@@ -238,9 +234,6 @@ func showPackageAction(app *tview.Application, pages *tview.Pages, title, label 
 
 // runSyncUpgrade chains update then upgrade through the streaming view.
 func runSyncUpgrade(app *tview.Application, pages *tview.Pages) {
-	if !ensureRoot(app, pages) {
-		return
-	}
 	combined := func(p libapt.ProgressFn) (*libapt.Result, error) {
 		updRes, err := libapt.UpdateWithProgress(p)
 		if err != nil {

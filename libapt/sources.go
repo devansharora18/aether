@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -349,41 +350,17 @@ func AddSource(entry SourceEntry) error {
 		path = "/etc/apt/sources.list.d/aether-custom.list"
 	}
 
-	// Make sure parent directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating directory %s: %w", dir, err)
-	}
-
 	line := entry.FormatOneLine()
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("opening %s: %w", path, err)
-	}
-	defer f.Close()
-
-	// Add a trailing newline if the file doesn't end with one
-	info, _ := f.Stat()
-	if info != nil && info.Size() > 0 {
-		// Read last byte
-		buf := make([]byte, 1)
-		rf, rerr := os.Open(path)
-		if rerr == nil {
-			rf.Seek(-1, 2)
-			rf.Read(buf)
-			rf.Close()
-			if buf[0] != '\n' {
-				f.WriteString("\n")
-			}
+	content := line + "\n"
+	if existing, err := os.ReadFile(path); err == nil && len(existing) > 0 {
+		content = string(existing)
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
 		}
+		content += line + "\n"
 	}
 
-	_, err = f.WriteString(line + "\n")
-	if err != nil {
-		return fmt.Errorf("writing to %s: %w", path, err)
-	}
-	return nil
+	return writeFileWithSudo(path, content)
 }
 
 // EditSource replaces the source entry at the recorded file/line position
@@ -415,7 +392,7 @@ func editOneLineSource(old SourceEntry, updated SourceEntry) error {
 
 	lines[lineIdx] = updated.FormatOneLine()
 
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+	return writeFileWithSudo(path, strings.Join(lines, "\n"))
 }
 
 // editDEB822Source replaces a DEB822 stanza with an updated one-line version
@@ -447,7 +424,7 @@ func editDEB822Source(old SourceEntry, updated SourceEntry) error {
 		}
 	}
 
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+	if err := writeFileWithSudo(path, strings.Join(lines, "\n")); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 
@@ -485,7 +462,7 @@ func deleteOneLineSource(entry SourceEntry) error {
 	// Remove the line entirely
 	lines = append(lines[:lineIdx], lines[lineIdx+1:]...)
 
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+	return writeFileWithSudo(path, strings.Join(lines, "\n"))
 }
 
 // deleteDEB822Source comments out the entire stanza in a .sources file.
@@ -513,7 +490,7 @@ func deleteDEB822Source(entry SourceEntry) error {
 		}
 	}
 
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+	return writeFileWithSudo(path, strings.Join(lines, "\n"))
 }
 
 // ToggleSource enables or disables a source entry in place.
@@ -628,5 +605,31 @@ func ReadSourceFile(path string) (string, error) {
 
 // WriteSourceFile writes content to a source file.
 func WriteSourceFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0644)
+	return writeFileWithSudo(path, content)
+}
+
+func writeFileWithSudo(path, content string) error {
+	tmp, err := os.CreateTemp("", "aether-write-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("sudo", "install", "-D", "-m", "0644", tmpName, path)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("sudo install %s: %w", path, err)
+	}
+	return nil
 }

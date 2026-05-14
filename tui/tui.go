@@ -21,15 +21,9 @@ func Run() error {
 	menu.AddItem("Remove package", "Equivalent to -R", 'r', func() { showPackageAction(app, pages, "Remove package", "Package(s)", removeStream) })
 	menu.AddItem("Purge package", "Remove + config files (-Rn)", 'p', func() { showPackageAction(app, pages, "Purge package", "Package(s)", purgeStream) })
 	menu.AddItem("Autoremove", "Remove unused dependencies (-Rc)", 'a', func() {
-		if !ensureRoot(app, pages) {
-			return
-		}
 		runStreamOperation(app, pages, "Autoremove", "", autoremoveStream())
 	})
 	menu.AddItem("Sync package database", "Equivalent to -Sy", 's', func() {
-		if !ensureRoot(app, pages) {
-			return
-		}
 		runStreamOperation(app, pages, "Sync package database", "", updateStream())
 	})
 	menu.AddItem("Sync + Upgrade", "Equivalent to -Syu", 'u', func() { runSyncUpgrade(app, pages) })
@@ -67,14 +61,6 @@ func Run() error {
 	})
 
 	return app.SetRoot(pages, true).EnableMouse(true).Run()
-}
-
-func ensureRoot(app *tview.Application, pages *tview.Pages) bool {
-	if os.Geteuid() == 0 {
-		return true
-	}
-	showInfoModal(app, pages, "Root required", "Run aether with sudo to perform install, remove, or update actions.")
-	return false
 }
 
 func showInfoModal(app *tview.Application, pages *tview.Pages, title, message string) {

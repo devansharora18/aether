@@ -14,25 +14,12 @@ import (
 // instead of the full apt progress lines.
 var Verbose = false
 
-func needsRoot(op string) bool {
-	if os.Geteuid() != 0 {
-		ui.Fatal("This operation requires root privileges.")
-		ui.Warn(fmt.Sprintf("Re-run with: sudo aether %s", op))
-		return false
-	}
-	return true
-}
-
 func Install(pkgs []string) {
 	if len(pkgs) == 0 {
 		ui.Fatal("No package name given.")
 		fmt.Fprintln(os.Stderr, "  Usage: aether -S <package> [package...]")
 		os.Exit(1)
 	}
-	if !needsRoot("-S " + strings.Join(pkgs, " ")) {
-		os.Exit(1)
-	}
-
 	ui.Header(fmt.Sprintf("Installing: %s", strings.Join(pkgs, "  ")))
 	if Verbose {
 		ui.Info("Invoking: apt install " + strings.Join(pkgs, " "))
@@ -65,10 +52,6 @@ func Remove(pkgs []string) {
 		fmt.Fprintln(os.Stderr, "  Usage: aether -R <package> [package...]")
 		os.Exit(1)
 	}
-	if !needsRoot("-R " + strings.Join(pkgs, " ")) {
-		os.Exit(1)
-	}
-
 	ui.Header(fmt.Sprintf("Removing: %s", strings.Join(pkgs, "  ")))
 	if Verbose {
 		ui.Info("Invoking: apt remove " + strings.Join(pkgs, " "))
@@ -96,10 +79,6 @@ func Remove(pkgs []string) {
 }
 
 func Sync() {
-	if !needsRoot("-Sy") {
-		os.Exit(1)
-	}
-
 	ui.Header("Synchronizing package databases")
 	if Verbose {
 		ui.Info("Invoking: apt update")
@@ -127,9 +106,6 @@ func Sync() {
 }
 
 func SyncUpgrade() {
-	if !needsRoot("-Syu") {
-		os.Exit(1)
-	}
 	ui.Header("Synchronizing package databases")
 	if Verbose {
 		ui.Info("Invoking: apt update")
@@ -211,10 +187,6 @@ func Purge(pkgs []string) {
 		fmt.Fprintln(os.Stderr, "  Usage: aether -Rn <package> [package...]")
 		os.Exit(1)
 	}
-	if !needsRoot("-Rn " + strings.Join(pkgs, " ")) {
-		os.Exit(1)
-	}
-
 	ui.Header(fmt.Sprintf("Purging (remove + config): %s", strings.Join(pkgs, "  ")))
 	if Verbose {
 		ui.Info("Invoking: apt remove --purge " + strings.Join(pkgs, " "))
@@ -242,10 +214,6 @@ func Purge(pkgs []string) {
 }
 
 func AutoRemoveAction() {
-	if !needsRoot("-Rc") {
-		os.Exit(1)
-	}
-
 	ui.Header("Removing unused dependencies")
 	if Verbose {
 		ui.Info("Invoking: apt autoremove")
@@ -383,9 +351,6 @@ func ListUpgradableAction() {
 }
 
 func CleanCache() {
-	if !needsRoot("-Sc") {
-		os.Exit(1)
-	}
 	ui.Header("Cleaning package cache")
 	_, err := libapt.Clean()
 	if err != nil {

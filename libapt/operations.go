@@ -6,7 +6,7 @@ import (
 
 func Install(pkgs []string, stream bool) (*Result, error) {
     args := append([]string{"install", "-y"}, pkgs...)
-    res, err := run(args, stream)
+    res, err := runElevated(args, stream)
     if err != nil {
         return res, classifyError("install", res.Output, err)
     }
@@ -15,7 +15,7 @@ func Install(pkgs []string, stream bool) (*Result, error) {
 
 func Remove(pkgs []string, stream bool) (*Result, error) {
     args := append([]string{"remove", "-y"}, pkgs...)
-    res, err := run(args, stream)
+    res, err := runElevated(args, stream)
     if err != nil {
         return res, classifyError("remove", res.Output, err)
     }
@@ -23,7 +23,7 @@ func Remove(pkgs []string, stream bool) (*Result, error) {
 }
 
 func Update(stream bool) (*Result, error) {
-    res, err := run([]string{"update"}, stream)
+    res, err := runElevated([]string{"update"}, stream)
     if err != nil {
         return res, classifyError("update", res.Output, err)
     }
@@ -31,7 +31,7 @@ func Update(stream bool) (*Result, error) {
 }
 
 func Upgrade(stream bool) (*Result, error) {
-    res, err := run([]string{"upgrade", "-y"}, stream)
+    res, err := runElevated([]string{"upgrade", "-y"}, stream)
     if err != nil {
         return res, classifyError("upgrade", res.Output, err)
     }
@@ -46,7 +46,7 @@ func Search(terms []string, stream bool) (*Result, error) {
 // Purge removes packages AND their configuration files (apt remove --purge).
 func Purge(pkgs []string, stream bool) (*Result, error) {
     args := append([]string{"remove", "--purge", "-y"}, pkgs...)
-    res, err := run(args, stream)
+    res, err := runElevated(args, stream)
     if err != nil {
         return res, classifyError("purge", res.Output, err)
     }
@@ -56,7 +56,7 @@ func Purge(pkgs []string, stream bool) (*Result, error) {
 // AutoRemove removes packages that were automatically installed to satisfy
 // dependencies and are no longer needed.
 func AutoRemove(stream bool) (*Result, error) {
-    res, err := run([]string{"autoremove", "-y"}, stream)
+    res, err := runElevated([]string{"autoremove", "-y"}, stream)
     if err != nil {
         return res, classifyError("autoremove", res.Output, err)
     }
@@ -172,12 +172,12 @@ func CountInstalled() (int, error) {
 
 // Clean removes cached .deb files.
 func Clean() (*Result, error) {
-    return run([]string{"clean"}, false)
+    return runElevated([]string{"clean"}, false)
 }
 
 // FixBrokenInstall attempts to repair broken dependencies.
 func FixBrokenInstall(stream bool) (*Result, error) {
-    res, err := run([]string{"--fix-broken", "install", "-y"}, stream)
+    res, err := runElevated([]string{"--fix-broken", "install", "-y"}, stream)
     if err != nil {
         return res, classifyError("fix-broken", res.Output, err)
     }
@@ -187,7 +187,7 @@ func FixBrokenInstall(stream bool) (*Result, error) {
 // InstallWithProgress installs packages while emitting progress events.
 func InstallWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
     args := append([]string{"install", "-y"}, pkgs...)
-    res, err := runWithProgress(args, onEvent)
+    res, err := runWithProgressElevated(args, onEvent)
     if err != nil {
         return res, classifyError("install", res.Output, err)
     }
@@ -197,7 +197,7 @@ func InstallWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
 // RemoveWithProgress removes packages while emitting progress events.
 func RemoveWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
     args := append([]string{"remove", "-y"}, pkgs...)
-    res, err := runWithProgress(args, onEvent)
+    res, err := runWithProgressElevated(args, onEvent)
     if err != nil {
         return res, classifyError("remove", res.Output, err)
     }
@@ -207,7 +207,7 @@ func RemoveWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
 // PurgeWithProgress remove+purge while emitting progress events.
 func PurgeWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
     args := append([]string{"remove", "--purge", "-y"}, pkgs...)
-    res, err := runWithProgress(args, onEvent)
+    res, err := runWithProgressElevated(args, onEvent)
     if err != nil {
         return res, classifyError("purge", res.Output, err)
     }
@@ -216,7 +216,7 @@ func PurgeWithProgress(pkgs []string, onEvent ProgressFn) (*Result, error) {
 
 // UpdateWithProgress updates package indexes with progress events.
 func UpdateWithProgress(onEvent ProgressFn) (*Result, error) {
-    res, err := runWithProgress([]string{"update"}, onEvent)
+    res, err := runWithProgressElevated([]string{"update"}, onEvent)
     if err != nil {
         return res, classifyError("update", res.Output, err)
     }
@@ -225,7 +225,7 @@ func UpdateWithProgress(onEvent ProgressFn) (*Result, error) {
 
 // UpgradeWithProgress upgrades packages with progress events.
 func UpgradeWithProgress(onEvent ProgressFn) (*Result, error) {
-    res, err := runWithProgress([]string{"upgrade", "-y"}, onEvent)
+    res, err := runWithProgressElevated([]string{"upgrade", "-y"}, onEvent)
     if err != nil {
         return res, classifyError("upgrade", res.Output, err)
     }
@@ -234,7 +234,7 @@ func UpgradeWithProgress(onEvent ProgressFn) (*Result, error) {
 
 // AutoRemoveWithProgress autoremoves packages with progress events.
 func AutoRemoveWithProgress(onEvent ProgressFn) (*Result, error) {
-    res, err := runWithProgress([]string{"autoremove", "-y"}, onEvent)
+    res, err := runWithProgressElevated([]string{"autoremove", "-y"}, onEvent)
     if err != nil {
         return res, classifyError("autoremove", res.Output, err)
     }
