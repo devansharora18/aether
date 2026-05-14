@@ -21,17 +21,39 @@ func Run() error {
 	menu.AddItem("Remove package", "Equivalent to -R", 'r', func() { showPackageAction(app, pages, "Remove package", "Package(s)", removeStream) })
 	menu.AddItem("Purge package", "Remove + config files (-Rn)", 'p', func() { showPackageAction(app, pages, "Purge package", "Package(s)", purgeStream) })
 	menu.AddItem("Autoremove", "Remove unused dependencies (-Rc)", 'a', func() {
-		runStreamOperation(app, pages, "Autoremove", "", autoremoveStream())
+		ensureSudo(app, pages, func(ok bool) {
+			if !ok {
+				return
+			}
+			runStreamOperation(app, pages, "Autoremove", "", autoremoveStream())
+		})
 	})
 	menu.AddItem("Sync package database", "Equivalent to -Sy", 's', func() {
-		runStreamOperation(app, pages, "Sync package database", "", updateStream())
+		ensureSudo(app, pages, func(ok bool) {
+			if !ok {
+				return
+			}
+			runStreamOperation(app, pages, "Sync package database", "", updateStream())
+		})
 	})
-	menu.AddItem("Sync + Upgrade", "Equivalent to -Syu", 'u', func() { runSyncUpgrade(app, pages) })
+	menu.AddItem("Sync + Upgrade", "Equivalent to -Syu", 'u', func() {
+		ensureSudo(app, pages, func(ok bool) {
+			if !ok {
+				return
+			}
+			runSyncUpgrade(app, pages)
+		})
+	})
 	menu.AddItem("Search packages", "Live results as you type", '/', func() { showSearch(app, pages) })
 	menu.AddItem("Package info", "Show detailed package info (-Qi)", 'd', func() { showPackageInfo(app, pages) })
 	menu.AddItem("List upgradable", "Show upgradable packages (-Qu)", 'l', func() { showListUpgradable(app, pages) })
 	menu.AddItem("Clean cache", "Remove cached packages (-Sc)", 'c', func() {
-		runStreamOperation(app, pages, "Clean cache", "", cleanStream())
+		ensureSudo(app, pages, func(ok bool) {
+			if !ok {
+				return
+			}
+			runStreamOperation(app, pages, "Clean cache", "", cleanStream())
+		})
 	})
 	menu.AddItem("Manage sources", "View/add/edit/delete APT sources", 'm', func() { showSources(app, pages) })
 	menu.AddItem("Background Operations", "View running downloads/updates", 'b', func() {

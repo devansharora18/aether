@@ -219,7 +219,12 @@ func showPackageAction(app *tview.Application, pages *tview.Pages, title, label 
 			return
 		}
 		pkgs := strings.Fields(text)
-		runStreamOperation(app, pages, title, strings.Join(pkgs, " "), makeRunner(pkgs))
+		ensureSudo(app, pages, func(ok bool) {
+			if !ok {
+				return
+			}
+			runStreamOperation(app, pages, title, strings.Join(pkgs, " "), makeRunner(pkgs))
+		})
 	})
 	form.AddButton("Back", func() {
 		pages.SwitchToPage("menu")

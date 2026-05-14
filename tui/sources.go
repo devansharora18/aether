@@ -130,13 +130,18 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 
 				switch buttonLabel {
 				case "Enable", "Disable":
-					err := libapt.ToggleSource(entry)
-					if err != nil {
-						showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to toggle source:\n%v", err))
-						return
-					}
-					loadSources()
-					renderPreview(sourcesList.GetCurrentItem())
+					ensureSudo(app, pages, func(ok bool) {
+						if !ok {
+							return
+						}
+						err := libapt.ToggleSource(entry)
+						if err != nil {
+							showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to toggle source:\n%v", err))
+							return
+						}
+						loadSources()
+						renderPreview(sourcesList.GetCurrentItem())
+					})
 
 				case "Edit":
 					showEditSourceForm(app, pages, &entry, func() {
@@ -178,13 +183,13 @@ func showSources(app *tview.Application, pages *tview.Pages) {
 
 		switch event.Rune() {
 		case 'a':
-			showAddSourceForm(app, pages, func() {
-				loadSources()
-				if sourcesList.GetItemCount() > 0 {
-					sourcesList.SetCurrentItem(sourcesList.GetItemCount() - 1)
-					renderPreview(sourcesList.GetCurrentItem())
-				}
-			})
+				showAddSourceForm(app, pages, func() {
+					loadSources()
+					if sourcesList.GetItemCount() > 0 {
+						sourcesList.SetCurrentItem(sourcesList.GetItemCount() - 1)
+						renderPreview(sourcesList.GetCurrentItem())
+					}
+				})
 			return nil
 
 		case 'e':
@@ -249,16 +254,21 @@ func showAddSourceForm(app *tview.Application, pages *tview.Pages, onDone func()
 			entry.Components = strings.Fields(comps)
 		}
 
-		err := libapt.AddSource(entry)
-		if err != nil {
-			showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to add source:\n%v", err))
-			return
-		}
+		ensureSudo(app, pages, func(ok bool) {
+			if !ok {
+				return
+			}
+			err := libapt.AddSource(entry)
+			if err != nil {
+				showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to add source:\n%v", err))
+				return
+			}
 
-		pages.RemovePage("add-source")
-		if onDone != nil {
-			onDone()
-		}
+			pages.RemovePage("add-source")
+			if onDone != nil {
+				onDone()
+			}
+		})
 	})
 
 	form.AddButton("Cancel", func() {
@@ -309,16 +319,21 @@ func showEditSourceForm(app *tview.Application, pages *tview.Pages, entry *libap
 			updated.Components = strings.Fields(comps)
 		}
 
-		err := libapt.EditSource(*entry, updated)
-		if err != nil {
-			showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to edit source:\n%v", err))
-			return
-		}
+		ensureSudo(app, pages, func(ok bool) {
+			if !ok {
+				return
+			}
+			err := libapt.EditSource(*entry, updated)
+			if err != nil {
+				showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to edit source:\n%v", err))
+				return
+			}
 
-		pages.RemovePage("edit-source")
-		if onDone != nil {
-			onDone()
-		}
+			pages.RemovePage("edit-source")
+			if onDone != nil {
+				onDone()
+			}
+		})
 	})
 
 	form.AddButton("Cancel", func() {
@@ -343,15 +358,20 @@ func showDeleteConfirm(app *tview.Application, pages *tview.Pages, entry libapt.
 				return
 			}
 
-			err := libapt.DeleteSource(entry)
-			if err != nil {
-				showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to delete source:\n%v", err))
-				return
-			}
+			ensureSudo(app, pages, func(ok bool) {
+				if !ok {
+					return
+				}
+				err := libapt.DeleteSource(entry)
+				if err != nil {
+					showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to delete source:\n%v", err))
+					return
+				}
 
-			if onDone != nil {
-				onDone()
-			}
+				if onDone != nil {
+					onDone()
+				}
+			})
 		})
 	styleModal(modal)
 	modal.SetTitle(" Confirm Delete ").SetBorder(true)
@@ -440,27 +460,32 @@ func openFileInEditor(app *tview.Application, pages *tview.Pages, path string, o
 
 		if event.Key() == tcell.KeyCtrlS {
 			newContent := editor.GetText()
-			err := libapt.WriteSourceFile(path, newContent)
-			if err != nil {
-				showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to save file:\n%v", err))
-				return nil
-			}
+			ensureSudo(app, pages, func(ok bool) {
+				if !ok {
+					return
+				}
+				err := libapt.WriteSourceFile(path, newContent)
+				if err != nil {
+					showInfoModal(app, pages, "Error", fmt.Sprintf("Failed to save file:\n%v", err))
+					return
+				}
 
-			content = newContent
+				content = newContent
 
-			modal := tview.NewModal().
-				SetText("File saved successfully.").
-				AddButtons([]string{"OK"}).
-				SetDoneFunc(func(_ int, _ string) {
-					pages.RemovePage("save-confirm")
-					pages.RemovePage("file-editor")
-					if onDone != nil {
-						onDone()
-					}
-				})
-			styleModal(modal)
-			modal.SetTitle(" Saved ").SetBorder(true)
-			pages.AddPage("save-confirm", modal, true, true)
+				modal := tview.NewModal().
+					SetText("File saved successfully.").
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(_ int, _ string) {
+						pages.RemovePage("save-confirm")
+						pages.RemovePage("file-editor")
+						if onDone != nil {
+							onDone()
+						}
+					})
+				styleModal(modal)
+				modal.SetTitle(" Saved ").SetBorder(true)
+				pages.AddPage("save-confirm", modal, true, true)
+			})
 			return nil
 		}
 

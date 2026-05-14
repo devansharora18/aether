@@ -140,7 +140,12 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 				if buttonIndex != 0 || buttonLabel != "Install" {
 					return
 				}
-				runStreamOperation(app, pages, "Install package", pkg.name, installStream([]string{pkg.name}))
+				ensureSudo(app, pages, func(ok bool) {
+					if !ok {
+						return
+					}
+					runStreamOperation(app, pages, "Install package", pkg.name, installStream([]string{pkg.name}))
+				})
 			})
 		styleModal(modal)
 		modal.SetTitle(" Confirm Install ").SetBorder(true)
@@ -292,9 +297,19 @@ func showSearch(app *tview.Application, pages *tview.Pages) {
 						pages.RemovePage("search-remove-modal")
 						switch buttonLabel {
 						case "Remove":
-							runStreamOperation(app, pages, "Remove package", pkg.name, removeStream([]string{pkg.name}))
+							ensureSudo(app, pages, func(ok bool) {
+								if !ok {
+									return
+								}
+								runStreamOperation(app, pages, "Remove package", pkg.name, removeStream([]string{pkg.name}))
+							})
 						case "Purge":
-							runStreamOperation(app, pages, "Purge package", pkg.name, purgeStream([]string{pkg.name}))
+							ensureSudo(app, pages, func(ok bool) {
+								if !ok {
+									return
+								}
+								runStreamOperation(app, pages, "Purge package", pkg.name, purgeStream([]string{pkg.name}))
+							})
 						}
 					})
 				styleModal(modal)
