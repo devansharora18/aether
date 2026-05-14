@@ -62,7 +62,7 @@ func Run() error {
 	menu.AddItem("Quit", "Exit aether", 'q', func() { app.Stop() })
 
 	if os.Geteuid() != 0 {
-		menu.SetTitle(" Actions  ·  read-only without root ")
+		menu.SetTitle(" Actions ")
 	}
 
 	hints := []keyHint{
