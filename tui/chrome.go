@@ -8,8 +8,6 @@ import (
 	"github.com/rivo/tview"
 )
 
-const appVersion = "v0.1.0"
-
 type keyHint struct {
 	key    string
 	action string
@@ -26,9 +24,9 @@ func makeHeader(breadcrumb string) *tview.TextView {
 	}
 
 	tv.SetText(fmt.Sprintf(
-		" [%s::b]aether[-:-:-] [%s]›[-] [%s]%s[-]   [%s]%s · %s[-]",
+		" [%s::b]aether[-:-:-] [%s]›[-] [%s]%s[-]   [%s]%s[-]",
 		cBrand, cMuted, cText, tview.Escape(breadcrumb),
-		cMuted, rootBadge, appVersion,
+		cMuted, rootBadge,
 	))
 	return tv
 }
